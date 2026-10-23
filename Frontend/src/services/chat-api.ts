@@ -173,6 +173,11 @@ export async function sendChatMessage({
   }
 
   const reader = response.body.getReader();
+  const cancelReader = () => {
+    void reader.cancel().catch(() => {});
+  };
+  signal?.addEventListener("abort", cancelReader, { once: true });
+  if (signal?.aborted) cancelReader();
   const decoder = new TextDecoder("utf-8");
   let buffer = "";
 
@@ -225,6 +230,7 @@ export async function sendChatMessage({
       for (const block of blocks) {
         processBlock(block);
       }
+      if (isTerminated || signal?.aborted) break;
     }
 
     // Flush any remaining buffered block if complete
@@ -247,5 +253,9 @@ export async function sendChatMessage({
     const error = err instanceof ChatApiError ? err : new ChatApiError(String(err));
     triggerError(error);
     throw error;
+  } finally {
+    signal?.removeEventListener("abort", cancelReader);
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
 }

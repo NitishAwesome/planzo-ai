@@ -109,7 +109,7 @@ export function EventFormDialog({ open, onOpenChange, event, onSuccess }: EventF
       setLocation(event.location);
       setLocQuery("");
       setLocResults([]);
-      setSimulateRisk(event.risk?.status === "active" || !!event.risk);
+      setSimulateRisk(event.risk?.source === "Simulated scenario");
       setRiskDetail(
         event.risk?.detail ?? "Heavy rain and sustained winds expected during the event window.",
       );

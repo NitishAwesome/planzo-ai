@@ -9,6 +9,7 @@ import type {
   VenueFormData,
 } from "@/data/types";
 import { createSeedState } from "@/data/seed";
+import { parsePersistedState } from "./persisted-state";
 import {
   approveProposal,
   cancelEvent,
@@ -37,8 +38,7 @@ function load(): DemoState {
   if (state) return state;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    const parsed = raw ? (JSON.parse(raw) as DemoState) : null;
-    state = parsed && parsed.version === 1 ? parsed : createSeedState();
+    state = (raw ? parsePersistedState(JSON.parse(raw)) : null) ?? createSeedState();
   } catch {
     state = createSeedState();
   }

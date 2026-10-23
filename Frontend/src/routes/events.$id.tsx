@@ -300,6 +300,7 @@ function Cockpit() {
 
           {!isCancelled && (
             <DisruptionControlCard
+              key={`${e.id}-${s.resetKey ?? 0}-${e.start}-${e.end}-${e.venueId}-${e.location?.latitude}-${e.location?.longitude}`}
               event={e}
               venue={v}
               onFocusStudio={() =>

@@ -53,7 +53,7 @@
   - Single-click clipboard copy with visual feedback toast.
   - Permanent audit logging in Activity history.
 - [x] **Automated Test Suites Passing:**
-  - Frontend Vitest: 106 / 106 tests passing (`npm test`).
+  - Frontend Vitest: 130 / 130 tests passing (`npm test`); see the [independent Codex review](../audits/2026-10-23-codex-review.md).
   - TypeScript Typecheck: 0 errors (`npx tsc --noEmit`).
   - ESLint: 0 errors (`npm run lint`).
   - Frontend Production Build: Succeeded cleanly (`npm run build`).
@@ -87,7 +87,7 @@
 | **Tagline (One-line pitch)** | `Grounded conversational operations assistant simulating Alexa+ to sense event disruptions, evaluate venue contingencies, and coordinate human-approved recovery.` |
 | **Track / Category** | `Alexa+ Simulated Experience` |
 | **Built With** | `React, TypeScript, TanStack Start, TanStack Router, Vite, Tailwind CSS, Python, FastAPI, Uvicorn, Google Gemini API, Google GenAI SDK, Open-Meteo API, HTTPX, Server-Sent Events` |
-| **GitHub Repository URL** | `https://github.com/[YOUR-USERNAME]/planzo-ai` (🚨 *Ensure repo is Public before submitting*) |
+| **GitHub Repository URL** | `https://github.com/NitishAwesome/planzo-ai` (public repository verified during the independent review) |
 | **Demo Video URL** | `[YOUR_YOUTUBE_OR_VIMEO_URL]` (🚨 *User action required*) |
 | **Project Description** | Copy formatted contents from `docs/submission/project_description.md`. |
 

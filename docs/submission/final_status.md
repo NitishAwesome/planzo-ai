@@ -1,5 +1,7 @@
 # Planzo — Final Product Status & Release Readiness Report
 
+> Historical P6E snapshot. The later [independent Codex review](../audits/2026-10-23-codex-review.md) records additional confirmed defects, fixes, dependency updates, and the current verification results (130 frontend tests and 21 backend tests).
+
 **Milestone:** P6E (Final Integration, End-to-End QA, Documentation & Hackathon Submission Readiness)  
 **Date:** October 23, 2026  
 **Repository:** `D:\planzo-ai`  

@@ -5,6 +5,7 @@ export const WEATHER_ATTRIBUTION = "Weather forecast data: Open-Meteo.com";
 export const WEATHER_ATTRIBUTION_URL = "https://open-meteo.com/";
 
 export interface HourlyForecastResponse {
+  fetched_at?: string;
   latitude: number;
   longitude: number;
   timezone: string;

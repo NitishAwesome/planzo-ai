@@ -1,4 +1,4 @@
-import { useState, useId } from "react";
+import { useEffect, useRef, useState, useId } from "react";
 import {
   AlertCircle,
   AlertTriangle,
@@ -27,7 +27,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Pill } from "@/components/bits";
 import type { GeoLocation, PlanEvent, Risk, Venue } from "@/data/types";
 import { evaluateLiveWeatherRisk, fmtDay, fmtTime, nowLocal, toMs } from "@/lib/planning";
-import { setEventLocationAction, setEventWeatherRiskAction } from "@/services/demo-store";
+import {
+  getDemoStateSnapshot,
+  setEventLocationAction,
+  setEventWeatherRiskAction,
+} from "@/services/demo-store";
 import {
   fetchHourlyForecast,
   searchLocations,
@@ -43,6 +47,15 @@ interface DisruptionControlCardProps {
 }
 
 export function DisruptionControlCard({ event, venue, onFocusStudio }: DisruptionControlCardProps) {
+  const forecastRequest = useRef<AbortController | null>(null);
+  const searchRequest = useRef<AbortController | null>(null);
+  useEffect(
+    () => () => {
+      forecastRequest.current?.abort();
+      searchRequest.current?.abort();
+    },
+    [],
+  );
   const [activeTab, setActiveTab] = useState<"simulated" | "forecast">(
     event.weatherMode ??
       (event.risk?.source === "Forecast from Open-Meteo" ? "forecast" : "simulated"),
@@ -96,19 +109,24 @@ export function DisruptionControlCard({ event, venue, onFocusStudio }: Disruptio
 
   // Location search handler
   const handleLocationSearch = async (query: string) => {
+    searchRequest.current?.abort();
+    const controller = new AbortController();
+    searchRequest.current = controller;
     setSearchQuery(query);
     if (query.trim().length < 2) {
       setSearchResults([]);
+      setIsSearchingLocation(false);
       return;
     }
     setIsSearchingLocation(true);
     try {
-      const results = await searchLocations(query);
+      const results = await searchLocations(query, controller.signal);
+      if (controller.signal.aborted) return;
       setSearchResults(results);
     } catch {
-      setSearchResults([]);
+      if (!controller.signal.aborted) setSearchResults([]);
     } finally {
-      setIsSearchingLocation(false);
+      if (searchRequest.current === controller) setIsSearchingLocation(false);
     }
   };
 
@@ -138,8 +156,12 @@ export function DisruptionControlCard({ event, venue, onFocusStudio }: Disruptio
       return;
     }
 
+    forecastRequest.current?.abort();
+    const controller = new AbortController();
+    forecastRequest.current = controller;
     setIsFetchingForecast(true);
     setForecastError(null);
+    setLastAssessment(null);
 
     try {
       const res = await fetchHourlyForecast(
@@ -147,9 +169,18 @@ export function DisruptionControlCard({ event, venue, onFocusStudio }: Disruptio
         event.location.longitude,
         event.location.timezone ?? "auto",
         forceFresh,
+        controller.signal,
       );
+      // A reset, edit or location change may have replaced this event while the
+      // request was in flight. Never apply evidence collected for the old event.
+      if (
+        controller.signal.aborted ||
+        getDemoStateSnapshot().events.find((current) => current.id === event.id) !== event
+      )
+        return;
 
-      const assessed = evaluateLiveWeatherRisk(res.hourly, event, venue, nowLocal());
+      const fetchedAt = res.fetched_at ?? nowLocal();
+      const assessed = evaluateLiveWeatherRisk(res.hourly, event, venue, fetchedAt);
 
       if (!assessed.canForecast) {
         setForecastError(
@@ -163,7 +194,7 @@ export function DisruptionControlCard({ event, venue, onFocusStudio }: Disruptio
         maxProb: assessed.maxPrecipitationProbability,
         rainMm: assessed.totalRainMm,
         maxWind: assessed.maxWindSpeedKmh,
-        fetchedAt: nowLocal(),
+        fetchedAt,
         canForecast: true,
       });
 
@@ -184,11 +215,12 @@ export function DisruptionControlCard({ event, venue, onFocusStudio }: Disruptio
         );
       }
     } catch (err: unknown) {
+      if (controller.signal.aborted) return;
       const msg = (err as Error)?.message ?? "Failed to retrieve forecast.";
       setForecastError(msg);
       toast.error(msg);
     } finally {
-      setIsFetchingForecast(false);
+      if (forecastRequest.current === controller) setIsFetchingForecast(false);
     }
   };
 
@@ -391,7 +423,8 @@ export function DisruptionControlCard({ event, venue, onFocusStudio }: Disruptio
           <div className="rounded-lg bg-primary/5 p-3 text-xs text-muted-foreground border border-primary/20">
             <strong className="text-foreground">Open-Meteo Forecast: </strong>
             Evaluates predictive meteorological forecasts up to 16 days ahead. Hourly precipitation
-            and wind data are filtered strictly to the event window.
+            and wind data use hourly intervals overlapping the event window, in the selected
+            location's local time.
           </div>
 
           {/* Location Selection & Geocoding */}
@@ -536,7 +569,8 @@ export function DisruptionControlCard({ event, venue, onFocusStudio }: Disruptio
                   Event Window Weather Analysis ({fmtTime(event.start)}–{fmtTime(event.end)})
                 </span>
                 <span className="text-[11px] text-muted-foreground">
-                  Checked: {fmtTime(lastAssessment.fetchedAt)}
+                  Fetched: {fmtTime(lastAssessment.fetchedAt)}
+                  {/(?:Z|\+00:00)$/.test(lastAssessment.fetchedAt) ? " UTC" : ""}
                 </span>
               </div>
 
@@ -584,8 +618,9 @@ export function DisruptionControlCard({ event, venue, onFocusStudio }: Disruptio
                     <div className="flex items-start gap-2 text-success font-medium">
                       <ShieldCheck className="h-4 w-4 shrink-0 mt-0.5" />
                       <span>
-                        Weather within safe margins (max {lastAssessment.maxProb}% rain chance,{" "}
-                        {lastAssessment.rainMm} mm). Outdoor event can proceed on schedule.
+                        No rain contingency triggered (max {lastAssessment.maxProb}% rain chance,{" "}
+                        {lastAssessment.rainMm} mm). Wind is shown for reference; other hazards are
+                        not assessed.
                       </span>
                     </div>
                   )

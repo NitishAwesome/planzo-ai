@@ -101,12 +101,14 @@ export function buildProposal(s: DemoState, eventId: string): Proposal | null {
     )[0];
   if (!best) return null;
   return {
-    id: proposalId(event.id, event.venueId, best.venue.id),
+    // Every operational mutation appends an activity record. Bind approval to that
+    // revision so an old card cannot authorize changed requirements or reservations.
+    id: `${proposalId(event.id, event.venueId, best.venue.id)}:${s.decisions.length}`,
     eventId: event.id,
     fromVenueId: event.venueId,
     toVenueId: best.venue.id,
     rationale: [
-      `Indoor setting protects against simulated ${event.risk.title.toLowerCase()} disruptions`,
+      `Indoor setting protects against ${event.risk.source === "Simulated scenario" ? "simulated " : ""}${event.risk.title.toLowerCase()} disruptions`,
       ...best.reasons,
       "Smallest eligible room — least unused capacity",
     ],
@@ -156,15 +158,20 @@ export function validateEventInput(
     errors.name = "Event name is required.";
   }
 
-  if (!input.date || !/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
+  const parsedDate = new Date(`${input.date}T00:00:00Z`);
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(input.date) ||
+    !Number.isFinite(parsedDate.getTime()) ||
+    parsedDate.toISOString().slice(0, 10) !== input.date
+  ) {
     errors.date = "A valid event date (YYYY-MM-DD) is required.";
   }
 
-  if (!input.startTime || !/^\d{2}:\d{2}$/.test(input.startTime)) {
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(input.startTime)) {
     errors.startTime = "Valid start time (HH:MM) is required.";
   }
 
-  if (!input.endTime || !/^\d{2}:\d{2}$/.test(input.endTime)) {
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(input.endTime)) {
     errors.endTime = "Valid end time (HH:MM) is required.";
   }
 
@@ -178,7 +185,7 @@ export function validateEventInput(
 
   if (
     typeof input.attendees !== "number" ||
-    isNaN(input.attendees) ||
+    !Number.isSafeInteger(input.attendees) ||
     input.attendees < 1 ||
     Math.floor(input.attendees) !== input.attendees
   ) {
@@ -345,6 +352,12 @@ export function updateEvent(
   const start = `${input.date}T${input.startTime}:00`;
   const end = `${input.date}T${input.endTime}:00`;
 
+  const contextChanged =
+    existing.start !== start ||
+    existing.end !== end ||
+    existing.venueId !== input.venueId ||
+    (input.location !== undefined &&
+      JSON.stringify(existing.location) !== JSON.stringify(input.location));
   let risk: Risk | null = existing.risk;
   if (input.simulateRisk) {
     risk = {
@@ -360,14 +373,20 @@ export function updateEvent(
         input.riskWindow?.trim() ||
         existing.risk?.window ||
         `${input.startTime} – ${input.endTime}`,
-      status: existing.risk?.status ?? "active",
+      status:
+        contextChanged ||
+        existing.status === "cancelled" ||
+        existing.risk?.source !== "Simulated scenario"
+          ? "active"
+          : (existing.risk?.status ?? "active"),
     };
-  } else {
+  } else if (existing.risk?.source !== "Forecast from Open-Meteo" || contextChanged) {
     risk = null;
   }
 
   const updatedEvent: PlanEvent = {
     ...existing,
+    status: existing.status === "cancelled" ? "scheduled" : existing.status,
     name: input.name.trim(),
     description: input.description?.trim(),
     organizer: input.organizer?.trim() || existing.organizer,
@@ -393,6 +412,16 @@ export function updateEvent(
         }
       : b,
   );
+  if (!updatedBookings.some((b) => b.id === existing.bookingId)) {
+    updatedBookings.push({
+      id: existing.bookingId,
+      eventId,
+      venueId: input.venueId,
+      holder: input.name.trim(),
+      start,
+      end,
+    });
+  }
 
   const fromV = getVenue(s, existing.venueId);
   const toV = getVenue(s, input.venueId);
@@ -782,8 +811,10 @@ export function buildAttendeeAnnouncement(
   fromVenueName: string,
   toVenueName: string,
 ): AttendeeAnnouncement {
-  const contingencyReason =
-    event.risk?.kind === "heavy-rain"
+  const liveForecast = event.risk?.source === "Forecast from Open-Meteo";
+  const contingencyReason = liveForecast
+    ? "heavy-rain forecast from Open-Meteo"
+    : event.risk?.kind === "heavy-rain"
       ? "simulated heavy-rain contingency"
       : event.risk?.title
         ? `simulated ${event.risk.title.toLowerCase()} contingency`
@@ -805,7 +836,7 @@ Location: ${toVenueName} (previously ${fromVenueName})
 
 Please proceed to ${toVenueName} for ${activityName}.
 
-[Draft — not sent. Internal simulated contingency announcement for organizer review.]
+[Draft — not sent. ${liveForecast ? "Contingency announcement" : "Internal simulated contingency announcement"} for organizer review.]
 
 Thank you,
 Event Operations Team`;
@@ -834,7 +865,7 @@ export function validateVenueInput(
 
   if (
     typeof input.capacity !== "number" ||
-    isNaN(input.capacity) ||
+    !Number.isSafeInteger(input.capacity) ||
     input.capacity < 1 ||
     Math.floor(input.capacity) !== input.capacity
   ) {
@@ -1088,6 +1119,12 @@ export function setEventLocation(
   const updatedEvent: PlanEvent = {
     ...existing,
     location,
+    // Forecasts belong to the coordinates used to fetch them.
+    risk:
+      existing.risk?.source === "Forecast from Open-Meteo" &&
+      JSON.stringify(existing.location) !== JSON.stringify(location)
+        ? null
+        : existing.risk,
   };
 
   return {
@@ -1123,55 +1160,80 @@ export function evaluateLiveWeatherRisk(
   venue: Venue | undefined,
   fetchedAt: string = nowLocal(),
 ): LiveWeatherAssessment {
-  if (!forecast || !forecast.time || forecast.time.length === 0) {
-    return {
-      canForecast: false,
-      reason: "No forecast data points available.",
-      maxPrecipitationProbability: 0,
-      totalRainMm: 0,
-      maxWindSpeedKmh: 0,
-      risk: null,
-    };
+  const unavailable = (reason: string): LiveWeatherAssessment => ({
+    canForecast: false,
+    reason,
+    maxPrecipitationProbability: 0,
+    totalRainMm: 0,
+    maxWindSpeedKmh: 0,
+    risk: null,
+  });
+  if (!forecast?.time?.length) {
+    return unavailable("No forecast data points available.");
   }
 
-  const startMs = toMs(event.start);
-  const endMs = toMs(event.end);
+  // Both inputs are wall-clock times at the event location. Compare on a neutral
+  // axis so the browser's timezone/DST cannot shift or collapse their hours.
+  const wallTime = (value: string) => Date.parse(`${value}Z`);
+  const startMs = wallTime(event.start);
+  const endMs = wallTime(event.end);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+    return unavailable("Invalid event time window.");
+  }
+  const hourMs = 60 * 60 * 1000;
 
-  // Match forecast hourly indices within event window
+  // Open-Meteo precipitation and probability describe the PRECEDING hour.
+  // Include each hourly interval that overlaps the event, without a time buffer.
   const matchingIndices: number[] = [];
   for (let i = 0; i < forecast.time.length; i++) {
-    const pt = forecast.time[i];
-    const ptMs = toMs(pt ?? "");
-    // Check if point falls within event window (or within 30 min buffer)
-    if (!isNaN(ptMs) && ptMs >= startMs - 1800000 && ptMs <= endMs + 1800000) {
+    const ptMs = wallTime(forecast.time[i] ?? "");
+    if (Number.isFinite(ptMs) && ptMs > startMs && ptMs - hourMs < endMs) {
       matchingIndices.push(i);
     }
   }
 
   if (matchingIndices.length === 0) {
-    return {
-      canForecast: false,
-      reason: "Event window outside available hourly forecast points.",
-      maxPrecipitationProbability: 0,
-      totalRainMm: 0,
-      maxWindSpeedKmh: 0,
-      risk: null,
-    };
+    return unavailable("Event window outside available hourly forecast points.");
   }
+  matchingIndices.sort((a, b) => wallTime(forecast.time[a]!) - wallTime(forecast.time[b]!));
 
   let maxProb = 0;
   let rainSum = 0;
   let maxWind = 0;
+  let coveredUntil = startMs;
 
   for (const idx of matchingIndices) {
-    const prob = forecast.precipitation_probability[idx];
-    if (typeof prob === "number" && prob > maxProb) maxProb = prob;
-
-    const rain = forecast.rain[idx] ?? forecast.precipitation[idx];
-    if (typeof rain === "number") rainSum += rain;
-
-    const wind = forecast.wind_speed_10m[idx];
-    if (typeof wind === "number" && wind > maxWind) maxWind = wind;
+    const intervalEnd = wallTime(forecast.time[idx]!);
+    if (intervalEnd - hourMs > coveredUntil) {
+      return unavailable("Hourly forecast does not cover the full event window.");
+    }
+    const prob = forecast.precipitation_probability?.[idx];
+    // Total precipitation includes showers; `rain` alone excludes them.
+    const rain = forecast.precipitation?.[idx];
+    const wind = forecast.wind_speed_10m?.[idx];
+    if (
+      typeof prob !== "number" ||
+      !Number.isFinite(prob) ||
+      prob < 0 ||
+      prob > 100 ||
+      typeof rain !== "number" ||
+      !Number.isFinite(rain) ||
+      rain < 0 ||
+      typeof wind !== "number" ||
+      !Number.isFinite(wind) ||
+      wind < 0
+    ) {
+      return unavailable(
+        "Required hourly forecast values are missing or invalid. Existing risk retained.",
+      );
+    }
+    maxProb = Math.max(maxProb, prob);
+    rainSum += rain;
+    maxWind = Math.max(maxWind, wind);
+    coveredUntil = Math.max(coveredUntil, intervalEnd);
+  }
+  if (coveredUntil < endMs) {
+    return unavailable("Hourly forecast does not cover the full event window.");
   }
 
   rainSum = Math.round(rainSum * 10) / 10;

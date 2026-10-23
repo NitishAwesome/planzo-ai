@@ -86,7 +86,7 @@ graph TD
 2. **Atomic State Update:** On approval, the event's venue changes to the new room, the previous booking slot is released, the new room is reserved, and the risk status is marked as `handled`.
 3. **Attendee Communication Draft:** Planzo automatically drafts an announcement with the exact event name, previous venue, new venue, unchanged time window, and contingency reason.
 4. **Clipboard Copy:** A single click copies the formatted draft with visual toast confirmation.
-5. **Audit Trail:** Every decision (approved or rejected) and facility modification is permanently appended to the chronological **Activity** log.
+5. **Activity History:** Decisions and facility modifications are appended to the browser-local **Activity** log. Reset Demo or clearing browser storage removes this history.
 
 ---
 
@@ -148,11 +148,13 @@ Open the development URL printed in the console (typically **`http://localhost:8
 
 ## 8. Running Automated Tests
 
-### Frontend (106 tests, TypeScript, ESLint, Build)
+The latest independent correctness and security review is documented in [the Codex audit report](docs/audits/2026-10-23-codex-review.md).
+
+### Frontend (130 tests, TypeScript, ESLint, Build)
 ```powershell
 cd D:\planzo-ai\Frontend
 
-# Run Vitest test suite (106 tests across 8 suites)
+# Run Vitest test suite (130 tests across 12 suites)
 npm test
 
 # Run TypeScript typecheck (0 errors)

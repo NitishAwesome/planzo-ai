@@ -43,7 +43,7 @@ interface ChatMessage {
   intent?: Intent;
   showProposal?: boolean;
   isStreaming?: boolean;
-  source?: "gemini" | "fallback";
+  source?: "gemini" | "fallback" | "computed";
   errorNotice?: string | null;
 }
 
@@ -153,7 +153,8 @@ export function DecisionStudio({
   }, [messages]);
 
   const approvedDecision = getEventRecoveryDecision(state, event.id);
-  const isRecovered = event.risk?.status === "handled" && !!approvedDecision;
+  const isRecovered =
+    event.status !== "cancelled" && event.risk?.status === "handled" && !!approvedDecision;
   const asked = messages.some((m) => m.role === "assistant" && m.intent === "check_risk");
   const lastReply = [...messages].reverse().find((m) => m.role === "assistant");
   const showProposal = !!proposal && !!lastReply?.showProposal && lastOutcome !== "rejected";
@@ -202,6 +203,22 @@ export function DecisionStudio({
 
     const userMsgId = `u-${Date.now()}`;
     const assistantMsgId = `a-${Date.now()}`;
+
+    if (intent === "approve_guidance") {
+      setMessages((prev) => [
+        ...prev,
+        { id: userMsgId, role: "user", text: t },
+        {
+          id: assistantMsgId,
+          role: "assistant",
+          text: fallback.text,
+          intent,
+          showProposal: fallback.showProposal,
+          source: "computed",
+        },
+      ]);
+      return;
+    }
 
     // Immediately render user message & pending assistant bubble
     setMessages((prev) => [

@@ -770,12 +770,13 @@ describe("planning", () => {
           "2026-10-23T08:00:00",
           "2026-10-23T11:00:00",
           "2026-10-23T12:00:00",
+          "2026-10-23T13:00:00",
           "2026-10-23T18:00:00",
         ],
-        precipitation_probability: [0, 15, 20, 85], // 85% is at 18:00
-        precipitation: [0, 0, 0.1, 8.5],
-        rain: [0, 0, 0.1, 8.5],
-        wind_speed_10m: [5, 10, 12, 35],
+        precipitation_probability: [0, 15, 20, 10, 85], // 85% is at 18:00
+        precipitation: [0, 0, 0.1, 0, 8.5],
+        rain: [0, 0, 0.1, 0, 8.5],
+        wind_speed_10m: [5, 10, 12, 10, 35],
       };
 
       const assessment = evaluateLiveWeatherRisk(mockForecast, techfest, courtyard, AT);
@@ -796,11 +797,12 @@ describe("planning", () => {
           "2026-10-23T10:00:00",
           "2026-10-23T11:00:00",
           "2026-10-23T12:00:00",
+          "2026-10-23T13:00:00",
         ],
-        precipitation_probability: [40, 75, 80, 70],
-        precipitation: [0.5, 3.2, 4.0, 2.1],
-        rain: [0.5, 3.2, 4.0, 2.1],
-        wind_speed_10m: [12, 22, 25, 20],
+        precipitation_probability: [40, 75, 80, 70, 60],
+        precipitation: [0.5, 3.2, 4.0, 2.1, 1.0],
+        rain: [0.5, 3.2, 4.0, 2.1, 1.0],
+        wind_speed_10m: [12, 22, 25, 20, 18],
       };
 
       const assessment = evaluateLiveWeatherRisk(mockForecast, techfest, courtyard, AT);

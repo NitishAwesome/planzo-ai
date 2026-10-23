@@ -96,7 +96,7 @@ describe("<DecisionStudio />", () => {
     const approveBtn = screen.getByRole("button", { name: /Approve moving/i });
     fireEvent.click(approveBtn);
 
-    expect(approveSpy).toHaveBeenCalledWith("techfest:courtyard->hall-a");
+    expect(approveSpy).toHaveBeenCalledWith(buildProposal(state, event.id)!.id);
   });
 
   describe("Alexa+ Simulation Mode (M3)", () => {
