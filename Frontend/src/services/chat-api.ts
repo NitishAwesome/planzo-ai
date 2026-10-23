@@ -1,7 +1,12 @@
 import type { DemoState, PlanEvent } from "@/data/types";
 import { buildProposal, evaluateVenues, getVenue } from "@/lib/planning";
 
-export const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000";
+export const DEFAULT_API_BASE_URL =
+  typeof window !== "undefined" &&
+  window.location.hostname !== "localhost" &&
+  window.location.hostname !== "127.0.0.1"
+    ? "https://planzo-ai.onrender.com"
+    : "http://127.0.0.1:8000";
 
 export const API_BASE_URL =
   (typeof import.meta !== "undefined" && import.meta.env && import.meta.env["VITE_API_BASE_URL"]) ||
