@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ActivityRouteImport } from './routes/activity'
 import { Route as EventsIndexRouteImport } from './routes/events.index'
 import { Route as EventsIdRouteImport } from './routes/events.$id'
+import { Route as VenuesIndexRouteImport } from './routes/venues.index'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -34,18 +35,25 @@ const EventsIdRoute = EventsIdRouteImport.update({
   path: '/events/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const VenuesIndexRoute = VenuesIndexRouteImport.update({
+  id: '/venues/',
+  path: '/venues/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
   '/events/$id': typeof EventsIdRoute
   '/events/': typeof EventsIndexRoute
+  '/venues/': typeof VenuesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
   '/events/$id': typeof EventsIdRoute
   '/events': typeof EventsIndexRoute
+  '/venues': typeof VenuesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -53,13 +61,14 @@ export interface FileRoutesById {
   '/activity': typeof ActivityRoute
   '/events/$id': typeof EventsIdRoute
   '/events/': typeof EventsIndexRoute
+  '/venues/': typeof VenuesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/activity' | '/events/$id' | '/events/'
+  fullPaths: '/' | '/activity' | '/events/$id' | '/events/' | '/venues/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/activity' | '/events/$id' | '/events'
-  id: '__root__' | '/' | '/activity' | '/events/$id' | '/events/'
+  to: '/' | '/activity' | '/events/$id' | '/events' | '/venues'
+  id: '__root__' | '/' | '/activity' | '/events/$id' | '/events/' | '/venues/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -67,6 +76,7 @@ export interface RootRouteChildren {
   ActivityRoute: typeof ActivityRoute
   EventsIdRoute: typeof EventsIdRoute
   EventsIndexRoute: typeof EventsIndexRoute
+  VenuesIndexRoute: typeof VenuesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -99,6 +109,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EventsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/venues/': {
+      id: '/venues/'
+      path: '/venues'
+      fullPath: '/venues/'
+      preLoaderRoute: typeof VenuesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -107,6 +124,7 @@ const rootRouteChildren: RootRouteChildren = {
   ActivityRoute: ActivityRoute,
   EventsIdRoute: EventsIdRoute,
   EventsIndexRoute: EventsIndexRoute,
+  VenuesIndexRoute: VenuesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

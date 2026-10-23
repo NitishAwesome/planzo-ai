@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Check, CheckCheck, CircleCheck, Copy, Info, Mail, ShieldCheck } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { CheckCheck, CircleCheck, Copy, Info, Mail, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import type { Decision, DemoState, PlanEvent } from "@/data/types";
@@ -16,6 +16,16 @@ export function RecoveryCompleted({
   decision: Decision;
 }) {
   const [copied, setCopied] = useState(false);
+  const [isCopying, setIsCopying] = useState(false);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const fromVenue = getVenue(state, decision.fromVenueId);
   const toVenue = getVenue(state, decision.toVenueId);
@@ -26,13 +36,19 @@ export function RecoveryCompleted({
   const announcement = buildAttendeeAnnouncement(event, fromName, toName);
 
   async function handleCopy() {
+    if (isCopying) return;
+    setIsCopying(true);
+
     let success = false;
+    let errorMessage: string | null = null;
+
     if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
       try {
         await navigator.clipboard.writeText(announcement.fullText);
         success = true;
-      } catch {
+      } catch (err) {
         success = false;
+        errorMessage = err instanceof Error ? err.message : "Clipboard write permission denied";
       }
     }
 
@@ -41,6 +57,7 @@ export function RecoveryCompleted({
         const textArea = document.createElement("textarea");
         textArea.value = announcement.fullText;
         textArea.style.position = "fixed";
+        textArea.style.left = "-9999px";
         textArea.style.opacity = "0";
         document.body.appendChild(textArea);
         textArea.focus();
@@ -52,9 +69,26 @@ export function RecoveryCompleted({
       }
     }
 
-    setCopied(true);
-    toast.success("Announcement draft copied to clipboard");
-    setTimeout(() => setCopied(false), 2000);
+    setIsCopying(false);
+
+    if (success) {
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+      setCopied(true);
+      toast.success("Announcement draft copied to clipboard");
+      copyTimeoutRef.current = setTimeout(() => {
+        setCopied(false);
+        copyTimeoutRef.current = null;
+      }, 2000);
+    } else {
+      setCopied(false);
+      toast.error(
+        errorMessage
+          ? `Could not copy announcement: ${errorMessage}. Please select the text manually.`
+          : "Could not copy announcement to clipboard. Please select the text manually.",
+      );
+    }
   }
 
   return (
@@ -75,8 +109,9 @@ export function RecoveryCompleted({
 
       <p className="mt-1.5 text-sm text-muted-foreground">
         <span className="font-semibold text-foreground">{event.name}</span> has been successfully
-        relocated to <span className="font-semibold text-foreground">{toName}</span>. The previous
-        venue slot ({fromName}) was released and demo event assignment was updated.
+        relocated to <span className="font-semibold text-foreground">{toName}</span> in demo state.
+        The previous venue slot ({fromName}) was released and simulated assignment was updated.
+        Attendees have not been notified (draft announcement ready below).
       </p>
 
       {/* Relocation Summary Metadata */}
@@ -128,6 +163,7 @@ export function RecoveryCompleted({
               variant="outline"
               size="sm"
               onClick={handleCopy}
+              disabled={isCopying}
               className="h-8 gap-1.5 text-xs font-semibold"
               aria-label="Copy attendee announcement draft to clipboard"
             >
@@ -147,7 +183,12 @@ export function RecoveryCompleted({
         </div>
 
         {/* Readable Preview */}
-        <div className="mt-3 space-y-2 rounded-lg bg-muted/40 p-3.5 text-xs sm:text-sm font-mono leading-relaxed text-foreground/90">
+        <div
+          tabIndex={0}
+          role="region"
+          aria-label="Announcement text for manual copying"
+          className="mt-3 select-all space-y-2 rounded-lg bg-muted/40 p-3.5 text-xs sm:text-sm font-mono leading-relaxed text-foreground/90 focus:outline-none focus:ring-1 focus:ring-primary"
+        >
           <div className="border-b pb-2 font-semibold text-foreground">
             Subject: {announcement.subject}
           </div>

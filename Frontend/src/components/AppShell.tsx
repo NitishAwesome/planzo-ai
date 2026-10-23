@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Activity, CalendarRange, LayoutGrid, RotateCcw } from "lucide-react";
+import { Activity, Building2, CalendarRange, LayoutGrid, RotateCcw } from "lucide-react";
 import type { ReactNode } from "react";
 import {
   AlertDialog,
@@ -18,6 +18,7 @@ import { toast } from "sonner";
 const NAV = [
   { to: "/", label: "Operations", icon: LayoutGrid, exact: true },
   { to: "/events", label: "Events", icon: CalendarRange, exact: false },
+  { to: "/venues", label: "Venues", icon: Building2, exact: false },
   { to: "/activity", label: "Activity", icon: Activity, exact: false },
 ] as const;
 
@@ -115,14 +116,23 @@ export function AppShell({ children }: { children: ReactNode }) {
         {children}
         <p className="mt-14 text-center text-xs text-muted-foreground">
           Alexa+ concept simulation · Independent prototype, not affiliated with Amazon · Weather
-          risks are simulated scenarios
+          forecast data:{" "}
+          <a
+            href="https://open-meteo.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-foreground"
+          >
+            Open-Meteo.com
+          </a>{" "}
+          · Simulated scenarios and live forecasts clearly distinguished
         </p>
       </main>
 
       {/* Mobile bottom nav */}
       <nav
         aria-label="Primary"
-        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-3 border-t bg-rail pb-[env(safe-area-inset-bottom)] md:hidden"
+        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t bg-rail pb-[env(safe-area-inset-bottom)] md:hidden"
       >
         {NAV.map(({ to, label, icon: Icon, exact }) => (
           <Link

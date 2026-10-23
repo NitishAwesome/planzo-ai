@@ -107,6 +107,25 @@ export async function sendChatMessage({
 
   const url = `${API_BASE_URL.replace(/\/+$/, "")}/api/chat`;
 
+  if (signal?.aborted) {
+    return;
+  }
+
+  let isTerminated = false;
+  let doneReceived = false;
+
+  const triggerDone = () => {
+    if (isTerminated || signal?.aborted) return;
+    isTerminated = true;
+    onDone?.();
+  };
+
+  const triggerError = (err: Error) => {
+    if (isTerminated || signal?.aborted) return;
+    isTerminated = true;
+    onError?.(err);
+  };
+
   let response: Response;
   const init: RequestInit = {
     method: "POST",
@@ -128,7 +147,7 @@ export async function sendChatMessage({
     }
     const message = err instanceof Error ? err.message : "Failed to connect to assistant service";
     const error = new ChatApiError(`Backend connection failed: ${message}`);
-    onError?.(error);
+    triggerError(error);
     throw error;
   }
 
@@ -143,19 +162,51 @@ export async function sendChatMessage({
       // keep fallback detail
     }
     const error = new ChatApiError(detail, response.status);
-    onError?.(error);
+    triggerError(error);
     throw error;
   }
 
   if (!response.body) {
     const error = new ChatApiError("Response body is not readable");
-    onError?.(error);
+    triggerError(error);
     throw error;
   }
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8");
   let buffer = "";
+
+  const processBlock = (block: string) => {
+    if (!block.trim()) return;
+    const msg = parseSseBlock(block);
+    if (!msg || isTerminated || signal?.aborted) return;
+
+    if (msg.event === "token") {
+      try {
+        const parsed = JSON.parse(msg.data) as { text?: string };
+        if (typeof parsed.text === "string") {
+          onToken(parsed.text);
+        }
+      } catch {
+        // If data is raw text
+        if (msg.data) onToken(msg.data);
+      }
+    } else if (msg.event === "done") {
+      doneReceived = true;
+      triggerDone();
+    } else if (msg.event === "error") {
+      let errText = "An error occurred during response generation";
+      try {
+        const parsed = JSON.parse(msg.data) as { error?: string };
+        if (parsed.error) errText = parsed.error;
+      } catch {
+        if (msg.data) errText = msg.data;
+      }
+      const error = new ChatApiError(errText);
+      triggerError(error);
+      throw error;
+    }
+  };
 
   try {
     while (true) {
@@ -172,66 +223,29 @@ export async function sendChatMessage({
       buffer = blocks.pop() ?? "";
 
       for (const block of blocks) {
-        if (!block.trim()) continue;
-        const msg = parseSseBlock(block);
-        if (!msg) continue;
-
-        if (msg.event === "token") {
-          try {
-            const parsed = JSON.parse(msg.data) as { text?: string };
-            if (typeof parsed.text === "string") {
-              onToken(parsed.text);
-            }
-          } catch {
-            // If data is raw text
-            if (msg.data) onToken(msg.data);
-          }
-        } else if (msg.event === "done") {
-          onDone?.();
-        } else if (msg.event === "error") {
-          let errText = "An error occurred during response generation";
-          try {
-            const parsed = JSON.parse(msg.data) as { error?: string };
-            if (parsed.error) errText = parsed.error;
-          } catch {
-            if (msg.data) errText = msg.data;
-          }
-          const error = new ChatApiError(errText);
-          onError?.(error);
-          throw error;
-        }
+        processBlock(block);
       }
     }
 
     // Flush any remaining buffered block if complete
     buffer += decoder.decode();
     if (buffer.trim()) {
-      const msg = parseSseBlock(buffer);
-      if (msg) {
-        if (msg.event === "token") {
-          try {
-            const parsed = JSON.parse(msg.data) as { text?: string };
-            if (typeof parsed.text === "string") onToken(parsed.text);
-          } catch {
-            if (msg.data) onToken(msg.data);
-          }
-        } else if (msg.event === "done") {
-          onDone?.();
-        } else if (msg.event === "error") {
-          const error = new ChatApiError(msg.data || "Error during stream");
-          onError?.(error);
-          throw error;
-        }
-      }
+      processBlock(buffer);
     }
 
-    onDone?.();
+    if (!doneReceived && !isTerminated) {
+      const eofError = new ChatApiError("Stream closed unexpectedly before completion");
+      triggerError(eofError);
+      throw eofError;
+    }
+
+    triggerDone();
   } catch (err) {
     if (signal?.aborted) {
       return;
     }
     const error = err instanceof ChatApiError ? err : new ChatApiError(String(err));
-    onError?.(error);
+    triggerError(error);
     throw error;
   }
 }

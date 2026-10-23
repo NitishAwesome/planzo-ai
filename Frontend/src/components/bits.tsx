@@ -34,8 +34,9 @@ export function Pill({
   );
 }
 
-export type EventStatus = "at-risk" | "handled" | "on-track";
+export type EventStatus = "at-risk" | "handled" | "on-track" | "cancelled";
 export function eventStatus(e: PlanEvent): EventStatus {
+  if (e.status === "cancelled") return "cancelled";
   if (e.risk?.status === "active") return "at-risk";
   if (e.risk?.status === "handled") return "handled";
   return "on-track";
@@ -44,15 +45,19 @@ export const STATUS_LABEL: Record<EventStatus, string> = {
   "at-risk": "At risk",
   handled: "Risk handled",
   "on-track": "On track",
+  cancelled: "Cancelled",
 };
 
 export function StatusPill({ event }: { event: PlanEvent }) {
   const s = eventStatus(event);
-  const tone: Tone = s === "at-risk" ? "warning" : "success";
+  const tone: Tone = s === "at-risk" ? "warning" : s === "cancelled" ? "destructive" : "success";
   return (
     <Pill tone={tone}>
       <span
-        className={cn("size-1.5 rounded-full", s === "at-risk" ? "bg-warning" : "bg-success")}
+        className={cn(
+          "size-1.5 rounded-full",
+          s === "at-risk" ? "bg-warning" : s === "cancelled" ? "bg-destructive" : "bg-success",
+        )}
         aria-hidden="true"
       />
       {STATUS_LABEL[s]}

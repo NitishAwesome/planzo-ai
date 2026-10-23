@@ -216,5 +216,162 @@ describe("chat-api service", () => {
 
       vi.restoreAllMocks();
     });
+
+    it("handles duplicate done events in SSE stream without invoking onDone multiple times", async () => {
+      const state = createSeedState();
+      const event = state.events[0]!;
+      let doneCount = 0;
+
+      const streamWithDuplicateDone =
+        'event: token\ndata: {"text": "All done"}\n\n' +
+        'event: done\ndata: {"status": "complete"}\n\n' +
+        'event: done\ndata: {"status": "complete"}\n\n';
+
+      const mockResponse = new Response(streamWithDuplicateDone, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);
+
+      await sendChatMessage({
+        state,
+        event,
+        userMessage: "Find alternative",
+        onToken: vi.fn(),
+        onDone: () => {
+          doneCount++;
+        },
+      });
+
+      expect(doneCount).toBe(1);
+
+      vi.restoreAllMocks();
+    });
+
+    it("handles stream error event followed by stream close without firing onDone or duplicate error", async () => {
+      const state = createSeedState();
+      const event = state.events[0]!;
+      let doneCount = 0;
+      let errorCount = 0;
+
+      const streamWithErrorAndClose =
+        'event: token\ndata: {"text": "Starting analysis..."}\n\n' +
+        'event: error\ndata: {"error": "Upstream service timeout"}\n\n';
+
+      const mockResponse = new Response(streamWithErrorAndClose, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);
+
+      await expect(
+        sendChatMessage({
+          state,
+          event,
+          userMessage: "Find alternative",
+          onToken: vi.fn(),
+          onDone: () => {
+            doneCount++;
+          },
+          onError: () => {
+            errorCount++;
+          },
+        }),
+      ).rejects.toThrow("Upstream service timeout");
+
+      expect(errorCount).toBe(1);
+      expect(doneCount).toBe(0);
+
+      vi.restoreAllMocks();
+    });
+
+    it("treats unexpected stream closure before done event as an error and never calls onDone", async () => {
+      const state = createSeedState();
+      const event = state.events[0]!;
+      let doneCalled = false;
+      let errorReported: Error | null = null;
+
+      // Stream closes abruptly after a token without any done or error event
+      const abruptStream = 'event: token\ndata: {"text": "Midway stream truncation..."}\n\n';
+
+      const mockResponse = new Response(abruptStream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);
+
+      await expect(
+        sendChatMessage({
+          state,
+          event,
+          userMessage: "Find alternative",
+          onToken: vi.fn(),
+          onDone: () => {
+            doneCalled = true;
+          },
+          onError: (e) => {
+            errorReported = e;
+          },
+        }),
+      ).rejects.toThrow(/Stream closed unexpectedly before completion/i);
+
+      expect(doneCalled).toBe(false);
+      expect(errorReported).toBeInstanceOf(ChatApiError);
+
+      vi.restoreAllMocks();
+    });
+
+    it("handles explicit request abort without invoking onDone or unhandled errors", async () => {
+      const state = createSeedState();
+      const event = state.events[0]!;
+      const controller = new AbortController();
+      let doneCalled = false;
+
+      // Create a stream that emits one chunk, then aborts
+      const encoder = new TextEncoder();
+      const readable = new ReadableStream({
+        start(c) {
+          c.enqueue(encoder.encode('event: token\ndata: {"text": "Cancelled..."}\n\n'));
+          // Controller will abort before done
+        },
+      });
+
+      const mockResponse = new Response(readable, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+
+      vi.spyOn(globalThis, "fetch").mockImplementationOnce(async (_url, init) => {
+        const signal = init?.signal as AbortSignal | undefined;
+        signal?.addEventListener("abort", () => {
+          // fetch throws DOMException when aborted
+        });
+        // Abort right away
+        controller.abort();
+        const err = new DOMException("The user aborted a request.", "AbortError");
+        throw err;
+      });
+
+      const onErrorSpy = vi.fn();
+      await sendChatMessage({
+        state,
+        event,
+        userMessage: "Find alternative",
+        signal: controller.signal,
+        onToken: vi.fn(),
+        onDone: () => {
+          doneCalled = true;
+        },
+        onError: onErrorSpy,
+      });
+
+      expect(doneCalled).toBe(false);
+      expect(onErrorSpy).not.toHaveBeenCalled();
+
+      vi.restoreAllMocks();
+    });
   });
 });

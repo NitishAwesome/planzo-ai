@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
+  AlertCircle,
   ArrowRight,
   Check,
   CircleCheck,
@@ -18,6 +19,7 @@ import type { DemoState, PlanEvent } from "@/data/types";
 import { EQUIPMENT_LABEL } from "@/data/types";
 import {
   buildProposal,
+  evaluateVenues,
   fmtTime,
   getEventRecoveryDecision,
   getVenue,
@@ -81,24 +83,37 @@ export function DecisionStudio({
   const hasSpeechSynthesis = typeof window !== "undefined" && "speechSynthesis" in window;
 
   const proposal = buildProposal(state, event.id);
-  const excludedVenue = proposal?.evaluations.find((e) => !e.eligible)?.venue;
+  const evaluations = proposal ? proposal.evaluations : evaluateVenues(state, event);
+  const excludedVenue = evaluations.find((e) => !e.eligible)?.venue;
   const excludedVenueName = excludedVenue ? excludedVenue.name : "another venue";
 
-  const standardSuggestions =
-    event.risk?.status === "handled" ? ["Check risk", "Show plan"] : STANDARD_SUGGESTIONS;
+  const hasActiveRisk = event.risk?.status === "active";
+  const isHandled = event.risk?.status === "handled";
+  const currentVenue = getVenue(state, event.venueId);
 
-  const alexaSuggestions =
-    event.risk?.status === "handled"
+  const standardSuggestions = isHandled
+    ? ["Check risk", "Show plan"]
+    : hasActiveRisk
+      ? ["Check risk", "Find an alternative", "Show plan"]
+      : ["Check status", "Check venue capacity", "Show schedule"];
+
+  const alexaSuggestions = isHandled
+    ? [
+        `Alexa, ask Planzo what's happening with ${event.name}`,
+        "Alexa, ask Planzo to show the recovery plan",
+        "Alexa, ask Planzo how many attendees are affected",
+      ]
+    : hasActiveRisk
       ? [
-          `Alexa, ask Planzo what's happening with ${event.name}`,
-          "Alexa, ask Planzo to show the recovery plan",
-          "Alexa, ask Planzo how many attendees are affected",
-        ]
-      : [
           `Alexa, ask Planzo what's happening with ${event.name}`,
           "Alexa, ask Planzo to find a safer venue",
           `Alexa, ask Planzo why ${excludedVenueName} won't work`,
           "Alexa, ask Planzo to show the recovery plan",
+        ]
+      : [
+          `Alexa, ask Planzo what's happening with ${event.name}`,
+          `Alexa, ask Planzo about the capacity of ${currentVenue?.name ?? "the venue"}`,
+          "Alexa, ask Planzo to show the schedule",
         ];
 
   const suggestions = mode === "alexa" ? alexaSuggestions : standardSuggestions;
@@ -123,7 +138,7 @@ export function DecisionStudio({
     setMessages([]);
     setLastOutcome(null);
     setIsSending(false);
-  }, [event.id, hasSpeechSynthesis]);
+  }, [event.id, state.resetKey, hasSpeechSynthesis]);
 
   // Cancel any in-flight request when component unmounts
   useEffect(() => {
@@ -219,12 +234,14 @@ export function DecisionStudio({
         userMessage: t,
         signal: controller.signal,
         onToken: (token) => {
+          if (controller.signal.aborted) return;
           receivedTokens = true;
           setMessages((prev) =>
             prev.map((m) => (m.id === assistantMsgId ? { ...m, text: m.text + token } : m)),
           );
         },
         onDone: () => {
+          if (controller.signal.aborted) return;
           setMessages((prev) =>
             prev.map((m) => (m.id === assistantMsgId ? { ...m, isStreaming: false } : m)),
           );
@@ -545,8 +562,8 @@ export function DecisionStudio({
               isSending
                 ? "Waiting for response..."
                 : mode === "alexa"
-                  ? 'Say or type: "Alexa, ask Planzo to find a safer venue"...'
-                  : 'Try "find an alternative"'
+                  ? 'Type an Alexa+-style command: "Alexa, ask Planzo to find a safer venue"...'
+                  : 'Ask about risk, schedule, or try "find an alternative"...'
             }
             className={cn(
               "h-11 min-w-0 flex-1 rounded-lg border border-input bg-card px-3.5 text-sm placeholder:text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring",
@@ -567,6 +584,12 @@ export function DecisionStudio({
 
       {showProposal && proposal && <ProposalCard state={state} event={event} onDecide={decide} />}
 
+      {!proposal &&
+        event.risk?.status === "active" &&
+        (lastReply?.intent === "find_alternative" || asked) && (
+          <NoEligibleVenuesCard state={state} event={event} />
+        )}
+
       {isRecovered && approvedDecision ? (
         <RecoveryCompleted state={state} event={event} decision={approvedDecision} />
       ) : lastOutcome === "rejected" ? (
@@ -576,6 +599,58 @@ export function DecisionStudio({
         </Outcome>
       ) : null}
     </section>
+  );
+}
+
+function NoEligibleVenuesCard({ state, event }: { state: DemoState; event: PlanEvent }) {
+  const evaluations = evaluateVenues(state, event);
+
+  return (
+    <div className="border-t px-5 py-5 md:px-6" aria-labelledby="no-venue-title">
+      <div className="flex items-center justify-between gap-2">
+        <h3
+          id="no-venue-title"
+          className="text-base font-extrabold text-destructive flex items-center gap-1.5"
+        >
+          <AlertCircle className="size-4" />
+          No eligible alternative venues
+        </h3>
+        <Pill tone="destructive">No proposal possible</Pill>
+      </div>
+
+      <p className="mt-2 text-sm text-muted-foreground">
+        Planzo evaluated all other campus venues for <strong>{event.name}</strong>, but none
+        currently meet the required capacity ({event.attendees} attendees), equipment (
+        {event.requiredEquipment.map((eq) => EQUIPMENT_LABEL[eq]).join(", ")}), and schedule
+        availability.
+      </p>
+
+      <h4 className="eyebrow mt-4">Venue evaluation breakdown</h4>
+      <ul className="mt-2 divide-y rounded-xl border">
+        {evaluations.map((ev) => (
+          <li
+            key={ev.venue.id}
+            className="flex flex-col gap-1 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between bg-destructive-soft/30"
+          >
+            <div className="flex items-center gap-2">
+              <X className="size-4 text-destructive shrink-0" aria-hidden="true" />
+              <span className="text-sm font-bold">{ev.venue.name}</span>
+              <span className="text-xs text-muted-foreground tabular">
+                {ev.venue.capacity} seats · {ev.venue.indoor ? "Indoor" : "Outdoor"}
+              </span>
+            </div>
+            <span className="text-xs text-destructive font-medium sm:text-right">
+              Excluded: {ev.reasons.join("; ")}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      <p className="mt-3 text-xs text-muted-foreground">
+        Recommendation: Reduce the expected attendee count or adjust required equipment in Edit
+        Event.
+      </p>
+    </div>
   );
 }
 

@@ -4,6 +4,7 @@ import { DecisionStudio } from "@/components/DecisionStudio";
 import { createSeedState } from "@/data/seed";
 import { approveProposal, buildProposal } from "@/lib/planning";
 import * as demoStore from "@/services/demo-store";
+import { toast } from "sonner";
 
 describe("<DecisionStudio />", () => {
   beforeEach(() => {
@@ -305,6 +306,86 @@ describe("<DecisionStudio />", () => {
       );
     });
 
+    it("handles clipboard API failure gracefully without showing false 'Copied!' success", async () => {
+      const state = createSeedState();
+      const proposal = buildProposal(state, "techfest")!;
+      const approvedState = approveProposal(state, proposal.id, "2026-10-23T10:05:00");
+      const event = approvedState.events.find((e) => e.id === "techfest")!;
+
+      const writeTextMock = vi.fn().mockRejectedValue(new Error("Clipboard permission denied"));
+      Object.defineProperty(navigator, "clipboard", {
+        writable: true,
+        configurable: true,
+        value: {
+          writeText: writeTextMock,
+        },
+      });
+
+      // Ensure fallback document.execCommand fails as well in jsdom environment
+      Object.defineProperty(document, "execCommand", {
+        writable: true,
+        configurable: true,
+        value: vi.fn().mockReturnValue(false),
+      });
+      const toastErrorSpy = vi.spyOn(toast, "error");
+
+      render(<DecisionStudio state={approvedState} event={event} />);
+
+      const copyBtn = screen.getByRole("button", {
+        name: "Copy attendee announcement draft to clipboard",
+      });
+      fireEvent.click(copyBtn);
+
+      await waitFor(() => {
+        expect(toastErrorSpy).toHaveBeenCalledWith(
+          expect.stringContaining("Could not copy announcement"),
+        );
+      });
+
+      // Verify "Copied!" is NEVER rendered on failure
+      expect(screen.queryByText("Copied!")).toBeNull();
+      // Button still retains copy action
+      expect(
+        screen.getByRole("button", { name: "Copy attendee announcement draft to clipboard" }),
+      ).toBeDefined();
+    });
+
+    it("prevents race conditions from repeated rapid clicks while copying", async () => {
+      const state = createSeedState();
+      const proposal = buildProposal(state, "techfest")!;
+      const approvedState = approveProposal(state, proposal.id, "2026-10-23T10:05:00");
+      const event = approvedState.events.find((e) => e.id === "techfest")!;
+
+      let resolveWrite: () => void;
+      const writePromise = new Promise<void>((res) => {
+        resolveWrite = res;
+      });
+      const writeTextMock = vi.fn().mockImplementation(() => writePromise);
+      Object.defineProperty(navigator, "clipboard", {
+        writable: true,
+        configurable: true,
+        value: {
+          writeText: writeTextMock,
+        },
+      });
+
+      render(<DecisionStudio state={approvedState} event={event} />);
+
+      const copyBtn = screen.getByRole("button", {
+        name: "Copy attendee announcement draft to clipboard",
+      });
+      fireEvent.click(copyBtn);
+      fireEvent.click(copyBtn);
+      fireEvent.click(copyBtn);
+
+      expect(writeTextMock).toHaveBeenCalledTimes(1);
+
+      resolveWrite!();
+      await waitFor(() => {
+        expect(screen.getByText("Copied!")).toBeDefined();
+      });
+    });
+
     it("does not render Recovery completed when a proposal is rejected", () => {
       const state = createSeedState();
       const event = state.events[0]!;
@@ -334,6 +415,60 @@ describe("<DecisionStudio />", () => {
       expect(screen.getByText("Recovery completed")).toBeDefined();
       expect(screen.getByText("Attendee announcement draft")).toBeDefined();
       expect(screen.getByText("Draft — not sent")).toBeDefined();
+    });
+  });
+
+  describe("P6A Conversation Isolation & Demo Reset Consistency", () => {
+    it("clears conversational messages and outcome state when demo is reset via resetKey", async () => {
+      const state = createSeedState();
+      const event = state.events[0]!;
+
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Offline"));
+
+      const { rerender } = render(<DecisionStudio state={state} event={event} />);
+
+      const altButton = screen.getByRole("button", { name: "Find an alternative" });
+      fireEvent.click(altButton);
+
+      await waitFor(() => {
+        expect(screen.getByText("Proposed change")).toBeDefined();
+        expect(screen.getByText("Why Seminar Hall A")).toBeDefined();
+      });
+
+      // Simulate demo reset: resetKey increments
+      const resetState = { ...createSeedState(), resetKey: Date.now() + 100 };
+      rerender(<DecisionStudio state={resetState} event={event} />);
+
+      await waitFor(() => {
+        expect(screen.queryByText("Proposed change")).toBeNull();
+        expect(screen.queryByText("Why Seminar Hall A")).toBeNull();
+      });
+    });
+
+    it("isolates conversations when switching between events", async () => {
+      const state = createSeedState();
+      const techfest = state.events.find((e) => e.id === "techfest")!;
+      const designReview = state.events.find((e) => e.id === "design-review")!;
+
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Offline"));
+
+      const { rerender } = render(<DecisionStudio state={state} event={techfest} />);
+
+      const altButton = screen.getByRole("button", { name: "Find an alternative" });
+      fireEvent.click(altButton);
+
+      await waitFor(() => {
+        expect(screen.getByText("Proposed change")).toBeDefined();
+        expect(screen.getByText("Why Seminar Hall A")).toBeDefined();
+      });
+
+      // Switch to Design Review event
+      rerender(<DecisionStudio state={state} event={designReview} />);
+
+      await waitFor(() => {
+        expect(screen.queryByText("Proposed change")).toBeNull();
+        expect(screen.queryByText("Why Seminar Hall A")).toBeNull();
+      });
     });
   });
 
