@@ -1,17 +1,47 @@
 import { useState } from "react";
-import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { ArrowLeft, CloudRain, Radio, ShieldCheck } from "lucide-react";
-import { useDemoState } from "@/services/demo-store";
-import { createSeedState } from "@/data/seed";
-import { EQUIPMENT_LABEL } from "@/data/types";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Calendar,
+  CloudRain,
+  Edit2,
+  Radio,
+  ShieldAlert,
+  ShieldCheck,
+  Trash2,
+  XCircle,
+} from "lucide-react";
+import { toast } from "sonner";
+import {
+  useDemoState,
+  getDemoStateSnapshot,
+  cancelEventAction,
+  deleteEventAction,
+} from "@/services/demo-store";
+import { EQUIPMENT_LABEL, type PlanEvent } from "@/data/types";
 import { fmtDay, fmtTime, getEvent, getVenue } from "@/lib/planning";
 import { Pill, SimLabel, StatusPill } from "@/components/bits";
 import { DecisionStudio, type StudioMode } from "@/components/DecisionStudio";
+import { DisruptionControlCard } from "@/components/DisruptionControlCard";
+import { EventFormDialog } from "@/components/EventFormDialog";
+import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/events/$id")({
   loader: ({ params }) => {
-    const e = createSeedState().events.find((x) => x.id === params.id);
+    const s = getDemoStateSnapshot();
+    const e = s.events.find((x) => x.id === params.id);
     return { name: e?.name ?? "Event" };
   },
   head: ({ loaderData }) => ({
@@ -35,16 +65,20 @@ export const Route = createFileRoute("/events/$id")({
 
 function Cockpit() {
   const { id } = Route.useParams();
+  const navigate = useNavigate();
   const [studioMode, setStudioMode] = useState<StudioMode>("standard");
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+
   const s = useDemoState();
   const e = getEvent(s, id);
 
   if (!e) {
     return (
-      <div className="surface p-8 text-center">
+      <div className="surface p-8 text-center space-y-3">
         <h1 className="text-2xl font-bold">Event not found</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          The requested event could not be found.
+        <p className="text-sm text-muted-foreground">
+          The requested event could not be found or has been deleted.
         </p>
         <Link
           to="/events"
@@ -58,15 +92,75 @@ function Cockpit() {
   }
 
   const v = getVenue(s, e.venueId);
+  const isCancelled = e.status === "cancelled";
+
+  const handleCancel = () => {
+    try {
+      cancelEventAction(e.id);
+      toast.success(`Event "${e.name}" has been cancelled. Venue schedule released.`);
+    } catch {
+      toast.error("Failed to cancel event.");
+    }
+  };
+
+  const handleDelete = () => {
+    try {
+      deleteEventAction(e.id);
+      toast.success(`Event "${e.name}" deleted.`);
+      navigate({ to: "/events" });
+    } catch {
+      toast.error("Failed to delete event.");
+    }
+  };
+
   return (
     <>
-      <Link
-        to="/events"
-        className="inline-flex items-center gap-1 text-sm font-semibold text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="size-4" aria-hidden="true" />
-        All events
-      </Link>
+      <div className="flex items-center justify-between">
+        <Link
+          to="/events"
+          className="inline-flex items-center gap-1 text-sm font-semibold text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="size-4" aria-hidden="true" />
+          All events
+        </Link>
+
+        {/* Cockpit Actions Toolbar */}
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsEditOpen(true)}
+            className="h-8 gap-1 text-xs font-semibold"
+          >
+            <Edit2 className="size-3.5" aria-hidden="true" />
+            <span>Edit Event</span>
+          </Button>
+
+          {!isCancelled && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCancel}
+              className="h-8 gap-1 text-xs font-semibold text-warning-ink hover:text-warning-ink hover:bg-warning-soft/40"
+            >
+              <XCircle className="size-3.5" aria-hidden="true" />
+              <span>Cancel Event</span>
+            </Button>
+          )}
+
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setIsDeleteOpen(true)}
+            className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive-soft"
+            title="Delete Event"
+            aria-label="Delete event"
+          >
+            <Trash2 className="size-3.5" aria-hidden="true" />
+          </Button>
+        </div>
+      </div>
+
       <div className="mt-3 mb-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-3xl font-extrabold tracking-tight">{e.name}</h1>
@@ -87,15 +181,39 @@ function Cockpit() {
           {studioMode === "alexa" ? "Exit Alexa+ Simulation" : "Enter Alexa+ Simulation"}
         </button>
       </div>
+
+      {/* Prominent Cancelled Notice */}
+      {isCancelled && (
+        <div className="mb-6 rounded-xl border border-destructive/30 bg-destructive-soft p-4 flex items-start gap-3">
+          <ShieldAlert className="size-5 shrink-0 text-destructive mt-0.5" />
+          <div className="space-y-1">
+            <h2 className="text-sm font-bold text-destructive">Event Cancelled</h2>
+            <p className="text-xs text-muted-foreground">
+              This event was cancelled. Its venue booking at {v?.name ?? "the venue"} has been
+              released and no contingency plan is active. You can edit the event details to
+              reschedule it.
+            </p>
+          </div>
+        </div>
+      )}
+
       <a
         href="#decision-studio"
         className="mb-4 inline-block text-sm font-semibold text-primary underline lg:hidden"
       >
         Jump to Decision Studio
       </a>
+
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
         <div className="space-y-6">
           <section className="surface p-5" aria-label="Event details">
+            {e.description && (
+              <div className="mb-4 pb-4 border-b">
+                <dt className="eyebrow">About</dt>
+                <dd className="mt-1 text-sm text-foreground">{e.description}</dd>
+              </div>
+            )}
+
             <dl className="grid grid-cols-2 gap-4 text-sm">
               <div>
                 <dt className="eyebrow">When</dt>
@@ -120,6 +238,39 @@ function Cockpit() {
                 <dt className="eyebrow">Capacity</dt>
                 <dd className="mt-1 font-bold tabular">{v ? `${v.capacity} seats` : "—"}</dd>
               </div>
+              <div>
+                <dt className="eyebrow">Organizer</dt>
+                <dd className="mt-1 font-medium">{e.organizer}</dd>
+              </div>
+              <div>
+                <dt className="eyebrow">Booking Status</dt>
+                <dd className="mt-1 font-semibold">
+                  {isCancelled ? (
+                    <span className="text-destructive">Booking Released</span>
+                  ) : (
+                    <span className="text-success">Confirmed #{e.bookingId}</span>
+                  )}
+                </dd>
+              </div>
+              <div className="col-span-2">
+                <dt className="eyebrow">Event Location</dt>
+                <dd className="mt-1 font-semibold flex items-center gap-1.5 text-xs sm:text-sm">
+                  <span
+                    className="inline-block size-2 rounded-full bg-primary"
+                    aria-hidden="true"
+                  />
+                  <span>
+                    {e.location
+                      ? `${e.location.name}${e.location.country ? `, ${e.location.country}` : ""}`
+                      : "Campus Main Grounds"}
+                  </span>
+                  {e.location && (
+                    <span className="text-xs text-muted-foreground tabular font-normal ml-1">
+                      ({e.location.latitude.toFixed(2)}°N, {e.location.longitude.toFixed(2)}°E)
+                    </span>
+                  )}
+                </dd>
+              </div>
               <div className="col-span-2">
                 <dt className="eyebrow">Needed equipment</dt>
                 <dd className="mt-2 flex flex-wrap gap-2">
@@ -130,58 +281,69 @@ function Cockpit() {
               </div>
             </dl>
           </section>
-          <section className="surface p-5" aria-labelledby="sch">
-            <h2 id="sch" className="text-base font-extrabold">
-              Schedule
-            </h2>
-            <ol className="mt-3 space-y-2 text-sm">
-              {e.schedule.map((x) => (
-                <li key={x.time} className="flex gap-4">
-                  <span className="w-12 font-bold tabular text-muted-foreground">{x.time}</span>
-                  {x.item}
-                </li>
-              ))}
-            </ol>
-          </section>
-          <section className="surface p-5" aria-labelledby="risk">
-            <div className="flex items-center justify-between gap-2">
-              <h2 id="risk" className="text-base font-extrabold">
-                Risk & evidence
+
+          {e.schedule && e.schedule.length > 0 && (
+            <section className="surface p-5" aria-labelledby="sch">
+              <h2 id="sch" className="text-base font-extrabold">
+                Schedule
               </h2>
-              {e.risk && <SimLabel />}
-            </div>
-            {e.risk ? (
-              <div className="mt-3 flex gap-3 text-sm">
-                <CloudRain
-                  className={
-                    e.risk.status === "active"
-                      ? "size-5 shrink-0 text-warning-ink"
-                      : "size-5 shrink-0 text-success"
-                  }
-                  aria-hidden="true"
-                />
-                <div>
-                  <p className="font-bold">
-                    {e.risk.title} · {e.risk.probability}% · {e.risk.window}
-                  </p>
-                  <p className="mt-1 text-muted-foreground">{e.risk.detail}</p>
-                  {e.risk.status === "handled" && (
-                    <p className="mt-2 font-semibold text-success">
-                      Handled — event moved to an indoor venue.
-                    </p>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <p className="mt-3 flex gap-2 text-sm text-muted-foreground">
-                <ShieldCheck className="size-5 text-success" aria-hidden="true" />
-                No disruption recorded for this event. No contingency is needed.
-              </p>
-            )}
-          </section>
+              <ol className="mt-3 space-y-2 text-sm">
+                {e.schedule.map((x) => (
+                  <li key={x.time} className="flex gap-4">
+                    <span className="w-12 font-bold tabular text-muted-foreground">{x.time}</span>
+                    {x.item}
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+
+          {!isCancelled && (
+            <DisruptionControlCard
+              event={e}
+              venue={v}
+              onFocusStudio={() =>
+                document.getElementById("decision-studio")?.scrollIntoView({ behavior: "smooth" })
+              }
+            />
+          )}
         </div>
-        <DecisionStudio state={s} event={e} mode={studioMode} onModeChange={setStudioMode} />
+
+        <DecisionStudio
+          key={`${e.id}-${s.resetKey ?? 0}`}
+          state={s}
+          event={e}
+          mode={studioMode}
+          onModeChange={setStudioMode}
+        />
       </div>
+
+      {/* Edit Event Dialog */}
+      <EventFormDialog open={isEditOpen} onOpenChange={setIsEditOpen} event={e} />
+
+      {/* Delete Confirmation Alert Dialog */}
+      <AlertDialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-lg font-bold">
+              Delete Event: {e.name}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to permanently delete this event? Its venue booking will be
+              released immediately. Past decisions and activity history will be retained.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep Event</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete Event
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
