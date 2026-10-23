@@ -1,11 +1,13 @@
+import { useState } from "react";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { ArrowLeft, CloudRain, ShieldCheck } from "lucide-react";
+import { ArrowLeft, CloudRain, Radio, ShieldCheck } from "lucide-react";
 import { useDemoState } from "@/services/demo-store";
 import { createSeedState } from "@/data/seed";
 import { EQUIPMENT_LABEL } from "@/data/types";
 import { fmtDay, fmtTime, getEvent, getVenue } from "@/lib/planning";
 import { Pill, SimLabel, StatusPill } from "@/components/bits";
-import { DecisionStudio } from "@/components/DecisionStudio";
+import { DecisionStudio, type StudioMode } from "@/components/DecisionStudio";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/events/$id")({
   loader: ({ params }) => {
@@ -34,6 +36,7 @@ export const Route = createFileRoute("/events/$id")({
 
 function Cockpit() {
   const { id } = Route.useParams();
+  const [studioMode, setStudioMode] = useState<StudioMode>("standard");
   const s = useDemoState();
   const e = getEvent(s, id)!;
   const v = getVenue(s, e.venueId)!;
@@ -46,9 +49,25 @@ function Cockpit() {
         <ArrowLeft className="size-4" aria-hidden="true" />
         All events
       </Link>
-      <div className="mt-3 mb-6 flex flex-wrap items-center gap-3">
-        <h1 className="text-3xl font-extrabold tracking-tight">{e.name}</h1>
-        <StatusPill event={e} />
+      <div className="mt-3 mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="text-3xl font-extrabold tracking-tight">{e.name}</h1>
+          <StatusPill event={e} />
+        </div>
+        <button
+          type="button"
+          onClick={() => setStudioMode((m) => (m === "alexa" ? "standard" : "alexa"))}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-bold transition-all",
+            studioMode === "alexa"
+              ? "border-primary bg-primary text-primary-foreground shadow-sm"
+              : "border-primary/40 bg-primary/10 text-primary hover:bg-primary/20",
+          )}
+          aria-label="Toggle Alexa+ Experience Simulation mode"
+        >
+          <Radio className="size-3.5" aria-hidden="true" />
+          {studioMode === "alexa" ? "Exit Alexa+ Simulation" : "Enter Alexa+ Simulation"}
+        </button>
       </div>
       <a
         href="#decision-studio"
@@ -143,7 +162,7 @@ function Cockpit() {
             )}
           </section>
         </div>
-        <DecisionStudio state={s} event={e} />
+        <DecisionStudio state={s} event={e} mode={studioMode} onModeChange={setStudioMode} />
       </div>
     </>
   );

@@ -3,9 +3,11 @@ import { createSeedState } from "@/data/seed";
 import {
   approveProposal,
   buildProposal,
+  normalizeVoiceQuery,
   overviewMetrics,
   parseIntent,
   rejectProposal,
+  replyFor,
 } from "./planning";
 
 const AT = "2026-10-22T12:00:00";
@@ -53,5 +55,42 @@ describe("planning", () => {
     expect(parseIntent("find an alternative")).toBe("find_alternative");
     expect(parseIntent("show plan")).toBe("show_plan");
     expect(parseIntent("order pizza")).toBe("unsupported");
+  });
+
+  describe("voice query normalization & intents", () => {
+    it("strips Alexa and Planzo invocations cleanly", () => {
+      expect(normalizeVoiceQuery("Alexa, ask Planzo to find a safer venue")).toBe(
+        "find a safer venue",
+      );
+      expect(normalizeVoiceQuery("Alexa, ask Planzo what's happening with TechFest")).toBe(
+        "what's happening with TechFest",
+      );
+      expect(normalizeVoiceQuery("Alexa, tell Planzo about the weather")).toBe("the weather");
+      expect(normalizeVoiceQuery("Alexa, check the risk")).toBe("check the risk");
+      expect(normalizeVoiceQuery("find an alternative")).toBe("find an alternative");
+    });
+
+    it("normalizes voice invocation prefixes correctly", () => {
+      expect(parseIntent("Alexa, ask Planzo what's happening with TechFest")).toBe("check_risk");
+      expect(parseIntent("Alexa, ask Planzo what's wrong with TechFest")).toBe("check_risk");
+      expect(parseIntent("Alexa, ask Planzo to find a safer venue")).toBe("find_alternative");
+      expect(parseIntent("Alexa, ask Planzo why Seminar Hall B won't work")).toBe(
+        "find_alternative",
+      );
+      expect(parseIntent("Alexa, ask Planzo to show the recovery plan")).toBe("show_plan");
+      expect(parseIntent("Alexa, ask Planzo how many attendees are affected")).toBe("show_plan");
+    });
+
+    it("intercepts conversational approval commands with safe guidance", () => {
+      expect(parseIntent("Alexa, approve this change")).toBe("approve_guidance");
+      expect(parseIntent("Please confirm and apply")).toBe("approve_guidance");
+
+      const state = createSeedState();
+      const reply = replyFor(state, "techfest", "approve_guidance");
+      expect(reply.intent).toBe("approve_guidance");
+      expect(reply.showProposal).toBe(true);
+      expect(reply.text).toContain("cannot be executed conversationally");
+      expect(reply.text).toContain('explicit "Approve" button');
+    });
   });
 });

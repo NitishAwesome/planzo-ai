@@ -169,14 +169,36 @@ export function overviewMetrics(s: DemoState) {
 }
 
 // ---------- Intents ----------
-export type Intent = "check_risk" | "find_alternative" | "show_plan" | "unsupported";
+export type Intent =
+  "check_risk" | "find_alternative" | "show_plan" | "approve_guidance" | "unsupported";
+
+/**
+ * Normalizes voice-style invocation phrases such as:
+ * "Alexa, ask Planzo to find a safer venue" -> "find a safer venue"
+ * "Alexa, ask Planzo what's happening with TechFest" -> "what's happening with TechFest"
+ * "Ask Planzo why Seminar Hall B won't work" -> "why Seminar Hall B won't work"
+ */
+export function normalizeVoiceQuery(text: string): string {
+  return text
+    .replace(/^\s*(?:alexa\s*[,:]?\s*)?(?:ask|tell)\s+planzo\s+(?:to\s+|about\s+|for\s+)?/i, "")
+    .replace(/^\s*alexa\s*[,:]?\s*/i, "")
+    .trim();
+}
 
 export function parseIntent(text: string): Intent {
-  const t = text.toLowerCase();
-  if (/(alternative|alternate|another venue|backup|relocat|move|contingency|find|indoor)/.test(t))
+  const t = normalizeVoiceQuery(text).toLowerCase();
+  if (
+    /(alternative|alternate|another venue|backup|relocat|move|contingency|find|safer venue|indoor|switch|seminar hall|venue|eligible|won't work|work)/.test(
+      t,
+    )
+  )
     return "find_alternative";
-  if (/(risk|weather|rain|threat|disrupt|forecast)/.test(t)) return "check_risk";
-  if (/(plan|schedule|summary|details|show)/.test(t)) return "show_plan";
+  if (
+    /(risk|weather|rain|threat|disrupt|forecast|wrong|happening|status|problem|issue|alert)/.test(t)
+  )
+    return "check_risk";
+  if (/(plan|schedule|summary|details|show|attendee|how many)/.test(t)) return "show_plan";
+  if (/(approve|accept|confirm|execute|apply)/.test(t)) return "approve_guidance";
   return "unsupported";
 }
 
@@ -239,6 +261,12 @@ export function replyFor(s: DemoState, eventId: string, intent: Intent): Assista
         intent,
         showProposal: active && !!buildProposal(s, eventId),
         text: `${event.name}: ${fmtDay(event.start)}, ${fmtTime(event.start)}–${fmtTime(event.end)} at ${venue.name}. ${event.attendees} attendees; needs ${event.requiredEquipment.map((e) => EQUIPMENT_LABEL[e].toLowerCase()).join(", ")}. ${active ? "Status: at risk, decision pending." : "Status: on track."}`,
+      };
+    case "approve_guidance":
+      return {
+        intent,
+        showProposal: active && !!buildProposal(s, eventId),
+        text: `To ensure operational safety, booking changes cannot be executed conversationally. Please review the proposal details below and click the explicit "Approve" button to confirm.`,
       };
     default:
       return {

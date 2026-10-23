@@ -1,5 +1,17 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { ArrowRight, Check, CircleCheck, CircleX, Send, X } from "lucide-react";
+import {
+  ArrowRight,
+  Check,
+  CircleCheck,
+  CircleX,
+  Info,
+  Radio,
+  Send,
+  Volume2,
+  VolumeX,
+  X,
+  Sparkles,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import type { DemoState, PlanEvent } from "@/data/types";
@@ -11,35 +23,108 @@ import {
   parseIntent,
   PlanningError,
   replyFor,
-  type AssistantReply,
+  type Intent,
 } from "@/lib/planning";
 import { approve, reject } from "@/services/demo-store";
+import { sendChatMessage } from "@/services/chat-api";
 import { cn } from "@/lib/utils";
 import { Pill } from "./bits";
 
-type Msg = { role: "user"; text: string } | { role: "assistant"; reply: AssistantReply };
-const SUGGESTIONS = ["Check risk", "Find an alternative", "Show plan"];
+export type StudioMode = "standard" | "alexa";
 
-export function DecisionStudio({ state, event }: { state: DemoState; event: PlanEvent }) {
-  const [messages, setMessages] = useState<Msg[]>([]);
+interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  intent?: Intent;
+  showProposal?: boolean;
+  isStreaming?: boolean;
+  source?: "gemini" | "fallback";
+  errorNotice?: string | null;
+}
+
+const STANDARD_SUGGESTIONS = ["Check risk", "Find an alternative", "Show plan"];
+
+export function DecisionStudio({
+  state,
+  event,
+  mode: controlledMode,
+  onModeChange,
+}: {
+  state: DemoState;
+  event: PlanEvent;
+  mode?: StudioMode;
+  onModeChange?: (mode: StudioMode) => void;
+}) {
+  const [internalMode, setInternalMode] = useState<StudioMode>("standard");
+  const mode = controlledMode ?? internalMode;
+
+  function setMode(newMode: StudioMode) {
+    if (onModeChange) {
+      onModeChange(newMode);
+    } else {
+      setInternalMode(newMode);
+    }
+  }
+
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  const [isSending, setIsSending] = useState(false);
   const [lastOutcome, setLastOutcome] = useState<null | "approved" | "rejected">(null);
-  const logRef = useRef<HTMLDivElement>(null);
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
 
+  const logRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const hasSpeechSynthesis = typeof window !== "undefined" && "speechSynthesis" in window;
+
+  const alexaSuggestions = [
+    `Alexa, ask Planzo what's happening with ${event.name}`,
+    "Alexa, ask Planzo to find a safer venue",
+    "Alexa, ask Planzo why Seminar Hall B won't work",
+    "Alexa, ask Planzo to show the recovery plan",
+  ];
+
+  const suggestions = mode === "alexa" ? alexaSuggestions : STANDARD_SUGGESTIONS;
+
+  // Stop any active speech on unmount
   useEffect(() => {
+    return () => {
+      if (hasSpeechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, [hasSpeechSynthesis]);
+
+  // Clear messages and cancel pending requests when event changes
+  useEffect(() => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    if (hasSpeechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    setSpeakingMessageId(null);
     setMessages([]);
     setLastOutcome(null);
-  }, [event.id]);
+    setIsSending(false);
+  }, [event.id, hasSpeechSynthesis]);
+
+  // Cancel any in-flight request when component unmounts
   useEffect(() => {
-    logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages.length]);
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
+
+  // Auto-scroll when messages update
+  useEffect(() => {
+    logRef.current?.scrollTo?.({ top: logRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages]);
 
   const proposal = buildProposal(state, event.id);
-  const asked = messages.some((m) => m.role === "assistant" && m.reply.intent === "check_risk");
-  const lastReply = [...messages]
-    .reverse()
-    .find((m): m is Extract<Msg, { role: "assistant" }> => m.role === "assistant");
-  const showProposal = !!proposal && !!lastReply?.reply.showProposal && lastOutcome !== "rejected";
+  const asked = messages.some((m) => m.role === "assistant" && m.intent === "check_risk");
+  const lastReply = [...messages].reverse().find((m) => m.role === "assistant");
+  const showProposal = !!proposal && !!lastReply?.showProposal && lastOutcome !== "rejected";
   const step =
     lastOutcome || event.risk?.status === "handled"
       ? 3
@@ -49,16 +134,123 @@ export function DecisionStudio({ state, event }: { state: DemoState; event: Plan
           ? 1
           : 0;
 
-  function ask(text: string) {
+  function toggleSpeech(messageId: string, text: string) {
+    if (!hasSpeechSynthesis) return;
+
+    if (speakingMessageId === messageId) {
+      window.speechSynthesis.cancel();
+      setSpeakingMessageId(null);
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.onend = () => setSpeakingMessageId(null);
+    utterance.onerror = () => setSpeakingMessageId(null);
+    setSpeakingMessageId(messageId);
+    window.speechSynthesis.speak(utterance);
+  }
+
+  async function ask(text: string) {
     const t = text.trim();
-    if (!t) return;
+    if (!t || isSending) return;
+
+    // Stop active speech before new query
+    if (hasSpeechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    setSpeakingMessageId(null);
+
+    // Deterministic planning logic remains authoritative for intents & proposal triggers
+    const intent = parseIntent(t);
+    const fallback = replyFor(state, event.id, intent);
+
     setLastOutcome(null);
-    setMessages((m) => [
-      ...m,
-      { role: "user", text: t },
-      { role: "assistant", reply: replyFor(state, event.id, parseIntent(t)) },
-    ]);
     setInput("");
+
+    const userMsgId = `u-${Date.now()}`;
+    const assistantMsgId = `a-${Date.now()}`;
+
+    // Immediately render user message & pending assistant bubble
+    setMessages((prev) => [
+      ...prev,
+      { id: userMsgId, role: "user", text: t },
+      {
+        id: assistantMsgId,
+        role: "assistant",
+        text: "",
+        intent,
+        showProposal: fallback.showProposal,
+        isStreaming: true,
+        source: "gemini",
+        errorNotice: null,
+      },
+    ]);
+
+    // Abort previous in-flight request if any
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    setIsSending(true);
+
+    let receivedTokens = false;
+
+    try {
+      await sendChatMessage({
+        state,
+        event,
+        userMessage: t,
+        signal: controller.signal,
+        onToken: (token) => {
+          receivedTokens = true;
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantMsgId ? { ...m, text: m.text + token } : m)),
+          );
+        },
+        onDone: () => {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantMsgId ? { ...m, isStreaming: false } : m)),
+          );
+          setIsSending(false);
+        },
+        onError: () => {
+          if (controller.signal.aborted) return;
+          setIsSending(false);
+
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.id !== assistantMsgId) return m;
+
+              if (!receivedTokens) {
+                // Offline fallback: Use deterministic replyFor response
+                return {
+                  ...m,
+                  text: fallback.text,
+                  source: "fallback",
+                  isStreaming: false,
+                  errorNotice: "AI assistant unavailable — showing computed response.",
+                };
+              } else {
+                // Streaming interrupted mid-flight: retain streamed text and append fallback guidance
+                return {
+                  ...m,
+                  isStreaming: false,
+                  source: "fallback",
+                  errorNotice: "Stream interrupted. Showing computed response.",
+                  text: m.text ? `${m.text}\n\n[Fallback]: ${fallback.text}` : fallback.text,
+                };
+              }
+            }),
+          );
+        },
+      });
+    } catch {
+      // Handled via onError callback
+    } finally {
+      if (abortControllerRef.current === controller) {
+        setIsSending(false);
+      }
+    }
   }
 
   function onSubmit(e: FormEvent) {
@@ -91,11 +283,66 @@ export function DecisionStudio({ state, event }: { state: DemoState; event: Plan
     >
       <div className="border-b px-5 py-4 md:px-6">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 id="studio-title" className="text-lg font-extrabold tracking-tight">
-            Decision Studio
-          </h2>
-          <Pill tone="primary">Alexa+ concept simulation</Pill>
+          <div className="flex items-center gap-2">
+            <h2 id="studio-title" className="text-lg font-extrabold tracking-tight">
+              {mode === "alexa" ? "Alexa+ Experience Simulation" : "Decision Studio"}
+            </h2>
+            <Pill tone="primary">
+              {mode === "alexa" ? "Voice Experience Simulation" : "Planzo Assistant"}
+            </Pill>
+          </div>
+
+          {/* Mode Switcher Segmented Pills */}
+          <div
+            role="tablist"
+            aria-label="Assistant mode selection"
+            className="flex items-center rounded-lg border bg-muted/60 p-1 text-xs"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "standard"}
+              onClick={() => setMode("standard")}
+              className={cn(
+                "rounded-md px-2.5 py-1 font-semibold transition-all",
+                mode === "standard"
+                  ? "bg-card text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              Standard
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "alexa"}
+              onClick={() => setMode("alexa")}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md px-2.5 py-1 font-semibold transition-all",
+                mode === "alexa"
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Radio className="size-3" aria-hidden="true" />
+              Alexa+ Simulation
+            </button>
+          </div>
         </div>
+
+        {/* Short Disclosure for Alexa+ Simulation Mode */}
+        {mode === "alexa" && (
+          <div className="mt-3 flex items-start gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">
+            <Info className="mt-0.5 size-3.5 shrink-0 text-primary" aria-hidden="true" />
+            <p>
+              <strong className="font-semibold text-foreground">Hackathon Simulation:</strong>{" "}
+              Simulated Alexa+-style interaction powered by Gemini. Not connected to Amazon Alexa
+              services.
+            </p>
+          </div>
+        )}
+
+        {/* Progress Stepper */}
         <ol className="mt-4 grid grid-cols-3 gap-2" aria-label="Progress">
           {["Sense", "Decide", "Act"].map((label, i) => {
             const done = step > i + 1 || (i === 2 && step === 3);
@@ -140,31 +387,110 @@ export function DecisionStudio({ state, event }: { state: DemoState; event: Plan
         className="max-h-[420px] space-y-3 overflow-y-auto bg-background/60 px-5 py-5 md:px-6"
       >
         {messages.length === 0 && (
-          <p className="text-sm text-muted-foreground">
-            Ask about <span className="font-semibold text-foreground">{event.name}</span>. Replies
-            are deterministic and computed from the venue and booking records — no live AI.
-          </p>
+          <div className="space-y-1 text-sm text-muted-foreground">
+            <p>
+              Ask about <span className="font-semibold text-foreground">{event.name}</span>.
+              {mode === "alexa"
+                ? " Speak or type natural voice requests like 'Alexa, ask Planzo to find a safer venue'."
+                : " Powered by Gemini with deterministic contingency planning."}
+            </p>
+          </div>
         )}
-        {messages.map((m, i) =>
+        {messages.map((m) =>
           m.role === "user" ? (
             <div
-              key={i}
+              key={m.id}
               className="ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground"
             >
               {m.text}
             </div>
           ) : (
             <div
-              key={i}
+              key={m.id}
               className={cn(
                 "max-w-[92%] rounded-2xl rounded-bl-md border bg-card px-4 py-3 text-sm leading-relaxed",
-                m.reply.intent === "unsupported" && "border-dashed",
+                m.intent === "unsupported" && "border-dashed",
+                m.source === "fallback" && "border-amber-500/40 bg-amber-500/5",
               )}
             >
-              <p className="eyebrow mb-1">
-                Planzo · {m.reply.intent === "unsupported" ? "Out of scope" : "Computed reply"}
-              </p>
-              {m.reply.text}
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <p className="eyebrow flex items-center gap-1.5">
+                  {mode === "alexa" && (
+                    <Sparkles className="size-3 text-primary" aria-hidden="true" />
+                  )}
+                  Planzo ·{" "}
+                  {mode === "alexa"
+                    ? m.source === "gemini"
+                      ? "Alexa+ Voice Assistant (Simulated)"
+                      : "Alexa+ Offline Reply"
+                    : m.source === "gemini"
+                      ? "Gemini Assistant"
+                      : m.intent === "unsupported"
+                        ? "Out of scope"
+                        : "Computed reply"}
+                </p>
+                {m.source === "fallback" && (
+                  <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400">
+                    Offline fallback
+                  </span>
+                )}
+              </div>
+
+              {m.isStreaming && !m.text ? (
+                <div className="flex items-center gap-1.5 py-1 text-muted-foreground">
+                  <span className="size-2 animate-bounce rounded-full bg-primary" />
+                  <span className="size-2 animate-bounce rounded-full bg-primary [animation-delay:0.2s]" />
+                  <span className="size-2 animate-bounce rounded-full bg-primary [animation-delay:0.4s]" />
+                  <span className="ml-1 text-xs">
+                    {mode === "alexa"
+                      ? "Simulating Alexa+ query response..."
+                      : "Analyzing event contingency..."}
+                  </span>
+                </div>
+              ) : (
+                <div className="whitespace-pre-wrap">{m.text}</div>
+              )}
+
+              {m.isStreaming && m.text && (
+                <span
+                  className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-primary align-middle"
+                  aria-hidden="true"
+                />
+              )}
+
+              {m.errorNotice && (
+                <p className="mt-2 text-xs font-semibold text-amber-700 dark:text-amber-400">
+                  {m.errorNotice}
+                </p>
+              )}
+
+              {/* Optional Speech Synthesis Button */}
+              {!m.isStreaming && m.text && hasSpeechSynthesis && (
+                <div className="mt-2.5 flex items-center border-t pt-2">
+                  <button
+                    type="button"
+                    onClick={() => toggleSpeech(m.id, m.text)}
+                    className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                    aria-label={
+                      speakingMessageId === m.id
+                        ? "Stop reading response aloud"
+                        : "Read response aloud using browser speech synthesis"
+                    }
+                  >
+                    {speakingMessageId === m.id ? (
+                      <>
+                        <VolumeX className="size-3.5 text-primary" aria-hidden="true" />
+                        <span>Stop playback</span>
+                      </>
+                    ) : (
+                      <>
+                        <Volume2 className="size-3.5" aria-hidden="true" />
+                        <span>Read response aloud</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
           ),
         )}
@@ -172,12 +498,18 @@ export function DecisionStudio({ state, event }: { state: DemoState; event: Plan
 
       <div className="border-t px-5 py-4 md:px-6">
         <div className="mb-3 flex flex-wrap gap-2" aria-label="Suggested requests">
-          {SUGGESTIONS.map((s) => (
+          {suggestions.map((s) => (
             <button
               key={s}
               type="button"
               onClick={() => ask(s)}
-              className="h-9 rounded-full border bg-card px-3.5 text-sm font-semibold hover:border-primary hover:text-primary"
+              disabled={isSending}
+              className={cn(
+                "h-auto min-h-9 rounded-full border bg-card px-3.5 py-1.5 text-left text-xs font-semibold transition-colors sm:text-sm",
+                isSending
+                  ? "cursor-not-allowed opacity-50"
+                  : "hover:border-primary hover:text-primary",
+              )}
             >
               {s}
             </button>
@@ -185,21 +517,31 @@ export function DecisionStudio({ state, event }: { state: DemoState; event: Plan
         </div>
         <form onSubmit={onSubmit} className="flex gap-2">
           <label htmlFor="studio-input" className="sr-only">
-            Ask Planzo about this event
+            {mode === "alexa" ? "Voice or text query for Alexa+" : "Ask Planzo about this event"}
           </label>
           <input
             id="studio-input"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder='Try "find an alternative"'
-            className="h-11 min-w-0 flex-1 rounded-lg border border-input bg-card px-3.5 text-sm placeholder:text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring"
+            disabled={isSending}
+            placeholder={
+              isSending
+                ? "Waiting for response..."
+                : mode === "alexa"
+                  ? 'Say or type: "Alexa, ask Planzo to find a safer venue"...'
+                  : 'Try "find an alternative"'
+            }
+            className={cn(
+              "h-11 min-w-0 flex-1 rounded-lg border border-input bg-card px-3.5 text-sm placeholder:text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring",
+              isSending && "cursor-not-allowed opacity-70",
+            )}
           />
           <Button
             type="submit"
             size="icon"
             className="h-11 w-11"
             aria-label="Send request"
-            disabled={!input.trim()}
+            disabled={!input.trim() || isSending}
           >
             <Send aria-hidden="true" />
           </Button>
