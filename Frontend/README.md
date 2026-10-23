@@ -1,47 +1,64 @@
-# Planzo — Event Contingency Assistant
+# Planzo Frontend
 
-**When plans change, move smarter.**
+React 19 + TanStack Start frontend application for **Planzo**, an intelligent event contingency cockpit and Alexa+-inspired simulation.
 
-Planzo is a working frontend prototype for event contingency planning. It helps an operator inspect a simulated disruption, evaluate possible alternative venues, approve or reject a recovery plan, and review the decision history.
+---
 
-## What works
+## Capabilities
 
-- Operations overview, event list, individual event cockpit, and activity history.
-- Deterministic venue selection based on indoor suitability, capacity, equipment, and schedule conflicts.
-- Explicit **Approve** and **Reject** actions with updated event and booking records.
-- Browser-local persistence and a **Reset demo** confirmation.
-- Responsive navigation and accessibility labels for key actions.
+- **Operations Dashboard (`/`):** High-level view of upcoming events, at-risk events, available alternative venues, and priority decision highlights.
+- **Event List & Cockpit (`/events`, `/events/$id`):** Detailed event schedule, attendee count, current venue specifications, and equipment needs.
+- **Alexa+ Experience Simulation:** Toggleable conversational interface simulating an Alexa+ multimodal smart screen experience, powered by live Gemini SSE streaming via the FastAPI backend.
+- **Deterministic Decision Studio:** Real-time venue eligibility evaluation (capacity, indoor setting, equipment match, schedule conflict).
+- **Human-in-the-Loop Guardrail:** Natural-language approval requests are safely intercepted with instructions directing users to manual confirmation buttons.
+- **Post-Approval Recovery (`RecoveryCompleted.tsx`):** Displays updated venue assignment, verification badges, and an auto-generated attendee communication draft with one-click clipboard copy.
+- **Activity Log (`/activity`):** Chronological history of all approved and rejected contingency actions.
+- **Offline Fallback:** Pre-computed advisory replies if the backend or internet connection is unavailable.
+- **Browser-Local Persistence:** Dynamic state saved to `localStorage` with an instant demo reset modal.
 
-The example **TechFest Workshop** is a simulated weather disruption. Risk details are **demo data**, not a live forecast. The assistant runs on deterministic rules; there is **no live AI, Alexa integration, or production backend**. This is an independent Alexa+ concept simulation, not an Amazon-affiliated product.
+---
 
-## Development
+## Scripts & Development
 
-From the `Frontend/` directory:
+From `Frontend/`:
 
-```bash
+```powershell
+# Install dependencies
 npm install
+
+# Run development server (Vite on http://localhost:8080)
 npm run dev
-```
 
-The local URL is printed in the terminal. To verify the project:
-
-```bash
-npx tsc --noEmit
+# Run Vitest test suite (43 tests)
 npm test
+
+# Run TypeScript type check
+npx tsc --noEmit
+
+# Run ESLint + Prettier
+npm run lint
+
+# Build production bundle
 npm run build
-npm audit
 ```
 
-## Important files
+---
 
-- `src/data/` — event, venue, booking, and risk types and seed data.
-- `src/lib/planning.ts` — venue eligibility, plan proposals, decisions, formatting.
-- `src/services/demo-store.ts` — browser-local state and persistence.
-- `src/components/` — application shell and decision workspace.
-- `src/routes/` — operations, events, event cockpit, and activity pages.
-- `public/brand/` — Planzo logo assets and app icon.
-- `public/favicon.ico`, `public/favicon-32x32.png`, `public/site.webmanifest` — browser branding.
+## Configuration
 
-## License
+Environment variables can be supplied in `Frontend/.env` or via Vite:
 
-See the `LICENSE` file in the parent `planzo-ai` repository.
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `VITE_API_BASE_URL` | `http://127.0.0.1:8000` | URL of the Planzo FastAPI backend service |
+
+---
+
+## Directory Structure
+
+- `src/components/` — UI components (`DecisionStudio.tsx`, `RecoveryCompleted.tsx`, `DecisionRow.tsx`, `AppShell.tsx`, `bits.tsx`).
+- `src/lib/planning.ts` — Deterministic venue eligibility, proposal generator, voice query normalizer, and announcement builder.
+- `src/data/` — Types and seed data (`seed.ts`, `types.ts`).
+- `src/services/` — `demo-store.ts` (localStorage state store), `chat-api.ts` (FastAPI SSE client).
+- `src/routes/` — TanStack file-based routes (`index.tsx`, `events.index.tsx`, `events.$id.tsx`, `activity.tsx`).
+- `src/test/` — Vitest unit and component tests.
