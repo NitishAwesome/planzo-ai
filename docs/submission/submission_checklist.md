@@ -17,7 +17,7 @@
   - No API keys, credentials, or personal secrets committed anywhere in git history or repository files.
 - [x] **Clean Dependency Manifests:**
   - `package.json` and `package-lock.json` are consistent; standard npm workflow verified.
-  - `Backend/requirements.txt` specifies tested pinned versions (`fastapi`, `uvicorn`, `google-genai`, `pydantic`).
+  - `Backend/requirements.txt` specifies tested pinned versions (`fastapi`, `uvicorn`, `google-genai`, `httpx`, `pydantic`).
 
 ---
 
@@ -26,7 +26,16 @@
 - [x] **FastAPI + Gemini Streaming Backend:**
   - Live SSE streaming endpoint at `POST /api/chat`.
   - Health check endpoint at `GET /api/health` returning configured status and model name.
-  - 14/14 Pytest tests passing in `Backend/`.
+  - Live meteorological search and forecast proxy at `GET /api/locations/search` and `GET /api/weather/forecast`.
+  - 21/21 Pytest tests passing in `Backend/`.
+- [x] **Live Meteorological Intelligence (Open-Meteo):**
+  - City geocoding with 10-minute in-memory TTL caching.
+  - Hourly forecast parsing within event time windows with 5-minute TTL caching.
+  - Distinct badges for `Forecast from Open-Meteo` vs `Simulated scenario` with Open-Meteo attribution.
+- [x] **Facility & Event Management (CRUD):**
+  - Venue creation, editing, and safe deletion (blocking deletion of occupied venues).
+  - Dynamic slot availability checker.
+  - Event creation, editing, cancellation, and deletion with capacity warnings.
 - [x] **Interactive Alexa+ Experience Simulation:**
   - Voice query normalization strips wake words and prefixes (`"Alexa, ask Planzo..."`).
   - Streaming UI with dynamic cursor, token-by-token rendering, and fallback indicators.
@@ -38,16 +47,17 @@
 - [x] **Human-in-the-Loop Action Safety Guardrail:**
   - Conversational approval attempts are intercepted with safety guidance.
   - Relocations can only be executed by clicking the manual "Approve" button.
-- [x] **Post-Approval Recovery Workflow (M4):**
+- [x] **Post-Approval Recovery Workflow:**
   - Instant transition to "Handled & verified" status upon approval.
   - Auto-generated attendee announcement draft with previous venue, new venue, unchanged time, and contingency reason.
   - Single-click clipboard copy with visual feedback toast.
   - Permanent audit logging in Activity history.
 - [x] **Automated Test Suites Passing:**
-  - Frontend Vitest: 43 / 43 tests passing (`npm test`).
+  - Frontend Vitest: 106 / 106 tests passing (`npm test`).
   - TypeScript Typecheck: 0 errors (`npx tsc --noEmit`).
   - ESLint: 0 errors (`npm run lint`).
   - Frontend Production Build: Succeeded cleanly (`npm run build`).
+  - Backend Pytest: 21 / 21 tests passing (`pytest`).
 
 ---
 
@@ -76,7 +86,7 @@
 | **Project Title** | `Planzo — Intelligent Event Contingency & Recovery Assistant` |
 | **Tagline (One-line pitch)** | `Grounded conversational operations assistant simulating Alexa+ to sense event disruptions, evaluate venue contingencies, and coordinate human-approved recovery.` |
 | **Track / Category** | `Alexa+ Simulated Experience` |
-| **Built With** | `React, TypeScript, TanStack Start, TanStack Router, Vite, Tailwind CSS, Python, FastAPI, Uvicorn, Google Gemini API, Google GenAI SDK, Server-Sent Events` |
+| **Built With** | `React, TypeScript, TanStack Start, TanStack Router, Vite, Tailwind CSS, Python, FastAPI, Uvicorn, Google Gemini API, Google GenAI SDK, Open-Meteo API, HTTPX, Server-Sent Events` |
 | **GitHub Repository URL** | `https://github.com/[YOUR-USERNAME]/planzo-ai` (🚨 *Ensure repo is Public before submitting*) |
 | **Demo Video URL** | `[YOUR_YOUTUBE_OR_VIMEO_URL]` (🚨 *User action required*) |
 | **Project Description** | Copy formatted contents from `docs/submission/project_description.md`. |

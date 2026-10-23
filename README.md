@@ -9,12 +9,13 @@ Planzo coordinates event disruption response by pairing conversational AI with a
 
 ## 1. What Planzo Is
 
-Planzo is an event operations cockpit that automates contingency evaluation while enforcing human-in-the-loop authorization. When an outdoor event faces imminent weather disruption, Planzo eliminates the frantic scramble across spreadsheets and campus calendars:
+Planzo is an event operations cockpit that automates contingency evaluation while enforcing human-in-the-loop authorization. When an outdoor or indoor event faces imminent disruption, Planzo eliminates the frantic scramble across spreadsheets and campus calendars:
 
-- **Sense:** Detects disruption risks (e.g. simulated heavy rain over outdoor venues).
+- **Sense:** Evaluates disruption threats using either **Live Meteorological Forecasts (via Open-Meteo API)** or **Simulated Scenario Controls** (rain probability, precipitation depth, wind speeds).
 - **Decide:** Deterministically evaluates all alternative campus venues against capacity, equipment, and conflicting bookings to propose the single best relocation.
 - **Act (Advisory):** Explains trade-offs via a Gemini-powered conversational assistant (simulating an Alexa+ agentic experience).
-- **Authorize & Recover:** A human operator must explicitly click **Approve**. Once authorized, Planzo swaps the bookings, updates the event status to handled, and drafts a ready-to-copy attendee announcement.
+- **Authorize & Recover:** A human operator must explicitly click **Approve**. Once authorized, Planzo swaps the bookings atomically, updates the event status to handled, and drafts a ready-to-copy attendee announcement.
+- **Manage Facilities & Schedules:** Full CRUD management for custom campus events and venues with live conflict detection and slot availability checking.
 
 ---
 
@@ -23,6 +24,7 @@ Planzo is an event operations cockpit that automates contingency evaluation whil
 Event organizers face high-stress, time-sensitive decisions when disruptions occur:
 - **Scattered Information:** Finding an open indoor venue requires cross-referencing room schedules, seat capacities, and audiovisual inventories.
 - **AI Hallucination Risks:** Generic AI agents cannot safely book facilities; unconstrained models might promise a conference room that is already booked or too small.
+- **Weather Uncertainty:** Operators need both live meteorological forecasts for upcoming dates and drill simulations to stress-test contingency plans.
 - **Communication Delays:** Relocating an event requires immediately drafting accurate announcements with exact room names and instructions for attendees.
 
 Planzo solves this by strictly separating **reasoning** from **execution**. The deterministic engine guarantees physical truth, while the conversational AI provides intuitive natural-language explanations.
@@ -50,14 +52,17 @@ graph TD
     User([Event Operator]) <--> UI[Frontend: React 19 + TanStack Start + Tailwind]
     UI <--> Engine[Deterministic Planning Engine: TypeScript]
     UI <--> Store[Demo State Store: localStorage]
-    UI -- "POST /api/chat (SSE Stream)" --> Backend[Backend: FastAPI + Uvicorn]
+    UI -- "GET /api/weather/forecast" --> Backend[Backend: FastAPI + Uvicorn]
+    UI -- "POST /api/chat (SSE Stream)" --> Backend
+    Backend -- "Geocoding & Hourly Forecast" --> OpenMeteo[Open-Meteo Weather API]
     Backend -- "aio.models.generate_content_stream" --> Gemini[Google Gemini API]
 ```
 
 - **Frontend:** React 19, TypeScript, TanStack Start & Router, Vite, Tailwind CSS, Lucide icons, Sonner toasts.
-- **Backend:** Python 3.11, FastAPI, Uvicorn, Google GenAI SDK (`google-genai`), Pydantic v2.
+- **Backend:** Python 3.11, FastAPI, Uvicorn, Google GenAI SDK (`google-genai`), HTTPX, Pydantic v2.
+- **Weather Intelligence:** Open-Meteo geocoding & hourly meteorological forecast API with in-memory TTL caching and visible attribution.
 - **Deterministic Planning:** Written in pure TypeScript with zero external planning dependencies.
-- **Storage:** Client-side `localStorage` with authoritative demo seed data and instant reset capability.
+- **Storage:** Client-side `localStorage` with authoritative demo seed data, full CRUD, and instant reset capability.
 
 ---
 
@@ -70,6 +75,7 @@ graph TD
 | **Venue Eligibility** | **Deterministic Logic** | Checking indoor suitability, seat capacity ($\ge$ attendees), required equipment, and time slot conflicts. |
 | **Proposal Selection** | **Deterministic Logic** | Selecting the smallest eligible venue that satisfies all requirements (least wasted capacity). |
 | **Booking Reassignment** | **Deterministic Logic** | Mutating bookings and event venue assignments only upon explicit human button click. |
+| **Weather Risk Evaluation** | **Deterministic Logic** | Evaluating forecast rain probabilities against safety thresholds within exact event hours. |
 | **Offline Fallback** | **Deterministic Logic** | Seamlessly generating pre-computed advisory replies if the backend or internet is unreachable. |
 
 ---
@@ -80,7 +86,7 @@ graph TD
 2. **Atomic State Update:** On approval, the event's venue changes to the new room, the previous booking slot is released, the new room is reserved, and the risk status is marked as `handled`.
 3. **Attendee Communication Draft:** Planzo automatically drafts an announcement with the exact event name, previous venue, new venue, unchanged time window, and contingency reason.
 4. **Clipboard Copy:** A single click copies the formatted draft with visual toast confirmation.
-5. **Audit Trail:** Every decision (approved or rejected) is permanently appended to the chronological **Activity** log.
+5. **Audit Trail:** Every decision (approved or rejected) and facility modification is permanently appended to the chronological **Activity** log.
 
 ---
 
@@ -123,7 +129,7 @@ Start the FastAPI backend:
 ```powershell
 .\.venv\Scripts\uvicorn.exe app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
-*Health Check: Verify `http://127.0.0.1:8000/api/health` returns `status: "ok"`.*
+*Health Check: Verify `http://127.0.0.1:8000/api/health` returns `status: "ok", gemini_configured: true`.*
 
 ### 3. Configure Frontend
 In a second PowerShell terminal:
@@ -136,40 +142,41 @@ npm install
 # Start Vite development server
 npm run dev
 ```
-Open **`http://localhost:8080`** in your browser.
+Open the development URL printed in the console (typically **`http://localhost:8080`** or **`http://localhost:3000`**) in your browser.
 
 ---
 
 ## 8. Running Automated Tests
 
-### Frontend (43 tests, TypeScript, ESLint, Build)
+### Frontend (106 tests, TypeScript, ESLint, Build)
 ```powershell
 cd D:\planzo-ai\Frontend
 
-# Run Vitest test suite
+# Run Vitest test suite (106 tests across 8 suites)
 npm test
 
-# Run TypeScript typecheck
+# Run TypeScript typecheck (0 errors)
 npx tsc --noEmit
 
-# Run ESLint
+# Run ESLint (0 errors)
 npm run lint
 
 # Run production build
 npm run build
 ```
 
-### Backend (14 tests)
+### Backend (21 tests)
 ```powershell
 cd D:\planzo-ai\Backend
-.\.venv\Scripts\pytest
+.\.venv\Scripts\pytest.exe
 ```
 
 ---
 
 ## 9. End-to-End Demo Walkthrough
 
-1. **Dashboard:** Open `http://localhost:8080/`. Observe 1 event needing a decision (**TechFest Workshop**, 50 attendees, Outdoor Courtyard, Heavy rain risk).
+### Scenario A: Seeded TechFest Workshop Recovery
+1. **Dashboard:** Open the application. Observe 1 event needing a decision (**TechFest Workshop**, 50 attendees, Outdoor Courtyard, Heavy rain risk).
 2. **Cockpit:** Click **Review contingency** to enter `/events/techfest`.
 3. **Alexa+ Mode:** Click **Enter Alexa+ Simulation** in the top right.
 4. **Inquire:** Click the prompt chip: *"Alexa, ask Planzo what's happening with TechFest Workshop"*. Observe live streaming Gemini response.
@@ -180,16 +187,24 @@ cd D:\planzo-ai\Backend
 9. **Recovery Complete:** Observe the event status update to **Handled & verified**, venue updated to **Seminar Hall A**, and the **Attendee announcement draft** card appear.
 10. **Copy Announcement:** Click **Copy announcement** to copy the formatted message to clipboard.
 11. **Activity Log:** Click **Activity** in the navigation to verify the recorded audit trail entry.
-12. **Reset Demo:** Click **Reset** in the bottom of the navigation rail and confirm in the dialog to restore original seed state at any time.
+
+### Scenario B: Custom Event, Custom Venue & Live Weather
+1. **Create Venue:** Navigate to `/venues`. Use the slot availability checker, then click **Add Venue** to create **Skyline Hall** (Capacity 150, Indoor, Projector + Seating + Audio).
+2. **Create Event:** Navigate to `/events`. Click **Create Event** and schedule **AI Innovation Summit** (100 attendees, Outdoor Courtyard, Projector + Seating).
+3. **Live Weather Check:** In the cockpit, switch to **Mode B – Live Forecast (Open-Meteo)**. Search for a city (e.g. *"Mumbai"*), select it, and click **Check Live Forecast** to inspect hourly rain probability, precipitation, and wind speeds.
+4. **Simulate Disruption:** Switch back to **Mode A – Simulated Scenario**, enable an 85% rain risk, and click **Update simulated risk**.
+5. **Evaluate & Recover:** In the Decision Studio, ask for an alternative. Verify that newly created **Skyline Hall** is evaluated and recommended!
+6. **Reset Demo:** Click **Reset** in the bottom of the navigation rail to restore the initial seed state at any time.
 
 ---
 
-## 10. Current Limitations & Known Scope
+## 10. Current Limitations & Scope Disclosures
 
-- **Simulation Scope:** Weather risks, forecasts, and cancellations are pre-configured demo scenarios for testing contingency workflows.
-- **Advisory Prototype:** Planzo prepares attendee announcements as drafts; it does not connect to third-party SMS/email delivery providers.
-- **Local Persistence:** Operational decisions persist in browser `localStorage`. Real multi-tenant persistence would utilize an enterprise database in production.
-- **Alexa+ Concept:** The voice interface simulates an Alexa+ smart screen experience inside the browser. It does not deploy to production Alexa hardware.
+- **Weather Data:** Live weather forecasts are fetched on-demand via the Open-Meteo API during the organizer's active session; Planzo does not run continuous unprompted background scraping.
+- **Weather Attribution:** Weather data is provided by [Open-Meteo.com](https://open-meteo.com/) under free non-commercial / CC-BY 4.0 terms.
+- **Draft Communication:** Planzo prepares attendee announcements as drafts with copy-to-clipboard functionality; it does not connect directly to third-party SMS/email delivery providers.
+- **Local Persistence:** Operational decisions, custom events, and venues persist in browser `localStorage`. Real multi-tenant persistence would utilize an enterprise database in production.
+- **Alexa+ Concept:** The voice interface simulates an Alexa+ smart screen experience inside the browser. It is an independent prototype and does not deploy to production Alexa hardware.
 
 ---
 
