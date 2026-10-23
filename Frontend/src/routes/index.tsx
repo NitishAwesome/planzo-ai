@@ -2,7 +2,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, CloudRain } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDemoState } from "@/services/demo-store";
-import { fmtDay, fmtTime, getVenue, overviewMetrics } from "@/lib/planning";
+import { fmtDay, fmtShortDate, fmtTime, getVenue, overviewMetrics } from "@/lib/planning";
+import { DEMO_TODAY } from "@/data/seed";
 import { DateBlock, PageHeader, SimLabel, StatusPill } from "@/components/bits";
 import { DecisionRow } from "@/components/DecisionRow";
 
@@ -34,20 +35,24 @@ function Overview() {
   const { upcoming, atRisk, focus, suitable } = overviewMetrics(s);
   const fv = focus ? getVenue(s, focus.venueId) : null;
   const recent = [...s.decisions].reverse().slice(0, 3);
+  const lastUpcoming = upcoming.at(-1);
+  const upcomingRangeLabel = lastUpcoming
+    ? `Through ${fmtShortDate(lastUpcoming.start).month} ${fmtShortDate(lastUpcoming.start).day}`
+    : "None scheduled";
   return (
     <>
       <PageHeader
-        eyebrow="Operations · Oct 22, 2026"
+        eyebrow={`Operations · ${fmtDay(DEMO_TODAY)}`}
         title={`${WORDS[atRisk.length] ?? `${atRisk.length} events need`} a decision`}
       >
         {focus
-          ? `${focus.name} is exposed to a simulated heavy-rain scenario. A suitable indoor alternative is available.`
+          ? `${focus.name} is exposed to a ${focus.risk ? `simulated ${focus.risk.title.toLowerCase()}` : "simulated disruption"} scenario. A suitable indoor alternative is available.`
           : "Every upcoming event is on track. Decisions you made are in the activity log."}
       </PageHeader>
 
       <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {[
-          ["Upcoming events", upcoming.length, "Through Oct 27"],
+          ["Upcoming events", upcoming.length, upcomingRangeLabel],
           ["At-risk events", atRisk.length, atRisk.length ? "Decision pending" : "None open"],
           [
             "Suitable venues available",

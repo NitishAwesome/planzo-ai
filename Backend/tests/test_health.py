@@ -24,3 +24,12 @@ def test_health_when_unconfigured(client: TestClient, monkeypatch):
     assert data["status"] == "ok"
     assert data["gemini_configured"] is False
     assert data["model"] == settings.gemini_model
+
+
+def test_allowed_origins_env_override(monkeypatch):
+    """Verifies that ALLOWED_ORIGINS env variable dynamically overrides default origins."""
+    monkeypatch.setenv("ALLOWED_ORIGINS", "https://planzo.app, https://demo.planzo.app")
+    from app.config import Settings
+    s = Settings()
+    assert s.allowed_origins == ["https://planzo.app", "https://demo.planzo.app"]
+

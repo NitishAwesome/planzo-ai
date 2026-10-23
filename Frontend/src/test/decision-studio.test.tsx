@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { DecisionStudio } from "@/components/DecisionStudio";
 import { createSeedState } from "@/data/seed";
+import { approveProposal, buildProposal } from "@/lib/planning";
 import * as demoStore from "@/services/demo-store";
 
 describe("<DecisionStudio />", () => {
@@ -240,6 +241,127 @@ describe("<DecisionStudio />", () => {
       fireEvent.click(readAloudBtn);
 
       expect(speakMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("Post-Approval Recovery & Announcement Draft (M4)", () => {
+    it("renders Recovery completed section and announcement draft after approval", () => {
+      const state = createSeedState();
+      const proposal = buildProposal(state, "techfest")!;
+      const approvedState = approveProposal(state, proposal.id, "2026-10-23T10:05:00");
+      const event = approvedState.events.find((e) => e.id === "techfest")!;
+
+      render(<DecisionStudio state={approvedState} event={event} />);
+
+      // Verify Recovery completed heading and status
+      expect(screen.getByText("Recovery completed")).toBeDefined();
+      expect(screen.getByText("Handled & verified")).toBeDefined();
+      expect(screen.getByText(/has been successfully relocated to/i)).toBeDefined();
+
+      // Verify previous and current venue metadata
+      expect(screen.getByText("Outdoor Courtyard")).toBeDefined();
+      expect(screen.getAllByText(/Seminar Hall A/).length).toBeGreaterThanOrEqual(2);
+      expect(screen.getByText("Assignment updated")).toBeDefined();
+
+      // Verify Attendee Announcement Draft card and "Draft — not sent" status
+      expect(screen.getByText("Attendee announcement draft")).toBeDefined();
+      expect(screen.getByText("Draft — not sent")).toBeDefined();
+      expect(screen.getByText("Subject: Important Venue Update — TechFest Workshop")).toBeDefined();
+      expect(screen.getByText(/Due to a simulated heavy-rain contingency/i)).toBeDefined();
+    });
+
+    it("allows copying the announcement draft to clipboard with visual confirmation", async () => {
+      const state = createSeedState();
+      const proposal = buildProposal(state, "techfest")!;
+      const approvedState = approveProposal(state, proposal.id, "2026-10-23T10:05:00");
+      const event = approvedState.events.find((e) => e.id === "techfest")!;
+
+      const writeTextMock = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        writable: true,
+        configurable: true,
+        value: {
+          writeText: writeTextMock,
+        },
+      });
+
+      render(<DecisionStudio state={approvedState} event={event} />);
+
+      const copyBtn = screen.getByRole("button", {
+        name: "Copy attendee announcement draft to clipboard",
+      });
+      expect(copyBtn).toBeDefined();
+      fireEvent.click(copyBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText("Copied!")).toBeDefined();
+      });
+
+      expect(writeTextMock).toHaveBeenCalledWith(
+        expect.stringContaining("Subject: Important Venue Update — TechFest Workshop"),
+      );
+      expect(writeTextMock).toHaveBeenCalledWith(
+        expect.stringContaining("Due to a simulated heavy-rain contingency"),
+      );
+    });
+
+    it("does not render Recovery completed when a proposal is rejected", () => {
+      const state = createSeedState();
+      const event = state.events[0]!;
+
+      render(<DecisionStudio state={state} event={event} />);
+
+      expect(screen.queryByText("Recovery completed")).toBeNull();
+      expect(screen.queryByText("Attendee announcement draft")).toBeNull();
+      expect(screen.queryByText("Draft — not sent")).toBeNull();
+    });
+
+    it("works consistently in Alexa+ Simulation mode", () => {
+      const state = createSeedState();
+      const proposal = buildProposal(state, "techfest")!;
+      const approvedState = approveProposal(state, proposal.id, "2026-10-23T10:05:00");
+      const event = approvedState.events.find((e) => e.id === "techfest")!;
+
+      render(<DecisionStudio state={approvedState} event={event} mode="alexa" />);
+
+      // Verify Alexa+ mode header & disclaimer are active
+      expect(screen.getByText("Alexa+ Experience Simulation")).toBeDefined();
+      expect(
+        screen.getByText(/Simulated Alexa\+-style interaction powered by Gemini/i),
+      ).toBeDefined();
+
+      // Verify Recovery completed & announcement draft are rendered seamlessly
+      expect(screen.getByText("Recovery completed")).toBeDefined();
+      expect(screen.getByText("Attendee announcement draft")).toBeDefined();
+      expect(screen.getByText("Draft — not sent")).toBeDefined();
+    });
+  });
+
+  describe("Dynamic Event Context & Absence of Stale Hardcoding (M5)", () => {
+    it("renders dynamic context for non-TechFest events without hardcoded TechFest strings", () => {
+      const state = createSeedState();
+      // Second event in seed data is 'design-review' (Product Design Review)
+      const event = state.events.find((e) => e.id === "design-review")!;
+
+      render(<DecisionStudio state={state} event={event} mode="alexa" />);
+
+      // Voice prompt chip should reference Product Design Review, NOT TechFest Workshop
+      expect(
+        screen.getByText("Alexa, ask Planzo what's happening with Product Design Review"),
+      ).toBeDefined();
+      expect(screen.queryByText(/TechFest/i)).toBeNull();
+      expect(screen.queryByText(/Seminar Hall B won't work/i)).toBeNull();
+    });
+
+    it("dynamically adapts Alexa suggestion when an alternative venue is excluded", () => {
+      const state = createSeedState();
+      // In seed state, TechFest excludes Seminar Hall B because of conflict and capacity
+      const event = state.events.find((e) => e.id === "techfest")!;
+
+      render(<DecisionStudio state={state} event={event} mode="alexa" />);
+
+      // First excluded venue for TechFest is Seminar Hall B
+      expect(screen.getByText("Alexa, ask Planzo why Seminar Hall B won't work")).toBeDefined();
     });
   });
 });

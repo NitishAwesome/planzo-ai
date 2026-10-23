@@ -12,8 +12,7 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/events/$id")({
   loader: ({ params }) => {
     const e = createSeedState().events.find((x) => x.id === params.id);
-    if (!e) throw notFound();
-    return { name: e.name };
+    return { name: e?.name ?? "Event" };
   },
   head: ({ loaderData }) => ({
     meta: [
@@ -38,8 +37,27 @@ function Cockpit() {
   const { id } = Route.useParams();
   const [studioMode, setStudioMode] = useState<StudioMode>("standard");
   const s = useDemoState();
-  const e = getEvent(s, id)!;
-  const v = getVenue(s, e.venueId)!;
+  const e = getEvent(s, id);
+
+  if (!e) {
+    return (
+      <div className="surface p-8 text-center">
+        <h1 className="text-2xl font-bold">Event not found</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          The requested event could not be found.
+        </p>
+        <Link
+          to="/events"
+          className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-primary underline"
+        >
+          <ArrowLeft className="size-4" aria-hidden="true" />
+          Back to all events
+        </Link>
+      </div>
+    );
+  }
+
+  const v = getVenue(s, e.venueId);
   return (
     <>
       <Link
@@ -93,14 +111,14 @@ function Cockpit() {
               </div>
               <div>
                 <dt className="eyebrow">Current venue</dt>
-                <dd className="mt-1 font-bold">{v.name}</dd>
+                <dd className="mt-1 font-bold">{v?.name ?? "Unknown venue"}</dd>
                 <dd className="text-xs text-muted-foreground">
-                  {v.building} · {v.indoor ? "Indoor" : "Outdoor"}
+                  {v?.building ?? "—"} · {v?.indoor ? "Indoor" : "Outdoor"}
                 </dd>
               </div>
               <div>
                 <dt className="eyebrow">Capacity</dt>
-                <dd className="mt-1 font-bold tabular">{v.capacity} seats</dd>
+                <dd className="mt-1 font-bold tabular">{v ? `${v.capacity} seats` : "—"}</dd>
               </div>
               <div className="col-span-2">
                 <dt className="eyebrow">Needed equipment</dt>

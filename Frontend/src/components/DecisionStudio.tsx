@@ -19,6 +19,7 @@ import { EQUIPMENT_LABEL } from "@/data/types";
 import {
   buildProposal,
   fmtTime,
+  getEventRecoveryDecision,
   getVenue,
   parseIntent,
   PlanningError,
@@ -29,6 +30,7 @@ import { approve, reject } from "@/services/demo-store";
 import { sendChatMessage } from "@/services/chat-api";
 import { cn } from "@/lib/utils";
 import { Pill } from "./bits";
+import { RecoveryCompleted } from "./RecoveryCompleted";
 
 export type StudioMode = "standard" | "alexa";
 
@@ -78,14 +80,28 @@ export function DecisionStudio({
 
   const hasSpeechSynthesis = typeof window !== "undefined" && "speechSynthesis" in window;
 
-  const alexaSuggestions = [
-    `Alexa, ask Planzo what's happening with ${event.name}`,
-    "Alexa, ask Planzo to find a safer venue",
-    "Alexa, ask Planzo why Seminar Hall B won't work",
-    "Alexa, ask Planzo to show the recovery plan",
-  ];
+  const proposal = buildProposal(state, event.id);
+  const excludedVenue = proposal?.evaluations.find((e) => !e.eligible)?.venue;
+  const excludedVenueName = excludedVenue ? excludedVenue.name : "another venue";
 
-  const suggestions = mode === "alexa" ? alexaSuggestions : STANDARD_SUGGESTIONS;
+  const standardSuggestions =
+    event.risk?.status === "handled" ? ["Check risk", "Show plan"] : STANDARD_SUGGESTIONS;
+
+  const alexaSuggestions =
+    event.risk?.status === "handled"
+      ? [
+          `Alexa, ask Planzo what's happening with ${event.name}`,
+          "Alexa, ask Planzo to show the recovery plan",
+          "Alexa, ask Planzo how many attendees are affected",
+        ]
+      : [
+          `Alexa, ask Planzo what's happening with ${event.name}`,
+          "Alexa, ask Planzo to find a safer venue",
+          `Alexa, ask Planzo why ${excludedVenueName} won't work`,
+          "Alexa, ask Planzo to show the recovery plan",
+        ];
+
+  const suggestions = mode === "alexa" ? alexaSuggestions : standardSuggestions;
 
   // Stop any active speech on unmount
   useEffect(() => {
@@ -121,7 +137,8 @@ export function DecisionStudio({
     logRef.current?.scrollTo?.({ top: logRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
 
-  const proposal = buildProposal(state, event.id);
+  const approvedDecision = getEventRecoveryDecision(state, event.id);
+  const isRecovered = event.risk?.status === "handled" && !!approvedDecision;
   const asked = messages.some((m) => m.role === "assistant" && m.intent === "check_risk");
   const lastReply = [...messages].reverse().find((m) => m.role === "assistant");
   const showProposal = !!proposal && !!lastReply?.showProposal && lastOutcome !== "rejected";
@@ -550,18 +567,14 @@ export function DecisionStudio({
 
       {showProposal && proposal && <ProposalCard state={state} event={event} onDecide={decide} />}
 
-      {lastOutcome === "approved" && (
-        <Outcome tone="success" title="Approved and applied">
-          {event.name} is now reserved in {getVenue(state, event.venueId)?.name}. The previous venue
-          slot was released and the decision was logged.
-        </Outcome>
-      )}
-      {lastOutcome === "rejected" && (
+      {isRecovered && approvedDecision ? (
+        <RecoveryCompleted state={state} event={event} decision={approvedDecision} />
+      ) : lastOutcome === "rejected" ? (
         <Outcome tone="destructive" title="Rejected — nothing changed">
           {event.name} stays at {getVenue(state, event.venueId)?.name}. The risk remains open; ask
           again for an alternative any time.
         </Outcome>
-      )}
+      ) : null}
     </section>
   );
 }

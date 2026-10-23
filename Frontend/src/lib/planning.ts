@@ -160,8 +160,8 @@ export function rejectProposal(s: DemoState, id: string, at: string): DemoState 
 }
 
 // ---------- Overview metrics ----------
-export function overviewMetrics(s: DemoState) {
-  const upcoming = s.events.filter((e) => toMs(e.end) >= toMs(DEMO_TODAY));
+export function overviewMetrics(s: DemoState, asOf: string = DEMO_TODAY) {
+  const upcoming = s.events.filter((e) => toMs(e.end) >= toMs(asOf));
   const atRisk = upcoming.filter((e) => e.risk?.status === "active");
   const focus = atRisk[0] ?? null;
   const suitable = focus ? evaluateVenues(s, focus).filter((e) => e.eligible).length : 0;
@@ -214,7 +214,7 @@ export function replyFor(s: DemoState, eventId: string, intent: Intent): Assista
   const risk = event.risk;
   const active = risk?.status === "active";
   switch (intent) {
-    case "check_risk":
+    case "check_risk": {
       if (!risk)
         return {
           intent,
@@ -225,13 +225,18 @@ export function replyFor(s: DemoState, eventId: string, intent: Intent): Assista
         return {
           intent,
           showProposal: false,
-          text: `The ${risk.title.toLowerCase()} (simulated scenario) was handled. ${event.name} is now in ${venue.name}, which is indoor.`,
+          text: `The ${risk.title.toLowerCase()} (simulated scenario) was handled. ${event.name} is now in ${venue.name}, which is ${venue.indoor ? "indoor" : "outdoor"}.`,
         };
+      const equipmentText =
+        event.requiredEquipment.length > 0
+          ? ` and the ${event.requiredEquipment.map((e) => EQUIPMENT_LABEL[e].toLowerCase()).join(", ")} setup are exposed`
+          : " are exposed";
       return {
         intent,
         showProposal: false,
-        text: `${risk.title} — ${risk.probability}% in the simulated scenario, ${risk.window}. ${venue.name} is outdoor, so ${event.attendees} attendees and the AV setup are exposed. Ask me to find an alternative.`,
+        text: `${risk.title} — ${risk.probability}% in the simulated scenario, ${risk.window}. ${venue.name} is ${venue.indoor ? "indoor" : "outdoor"}, so ${event.attendees} attendees${equipmentText}. Ask me to find an alternative.`,
       };
+    }
     case "find_alternative": {
       if (!active)
         return {
@@ -308,4 +313,46 @@ export function nowLocal(): string {
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+// ---------- Attendee Communication Draft (M4) ----------
+export interface AttendeeAnnouncement {
+  subject: string;
+  body: string;
+  fullText: string;
+}
+
+export function buildAttendeeAnnouncement(
+  event: PlanEvent,
+  fromVenueName: string,
+  toVenueName: string,
+): AttendeeAnnouncement {
+  const contingencyReason =
+    event.risk?.kind === "heavy-rain"
+      ? "simulated heavy-rain contingency"
+      : event.risk?.title
+        ? `simulated ${event.risk.title.toLowerCase()} contingency`
+        : "simulated weather contingency";
+
+  const activityName = event.name.toLowerCase().includes("workshop") ? "the workshop" : event.name;
+
+  const subject = `Important Venue Update — ${event.name}`;
+  const body = `Hello attendees,
+
+Due to a ${contingencyReason}, the ${event.name} has been relocated from ${fromVenueName} to ${toVenueName}.
+
+The event date and time remain unchanged.
+
+Please proceed to ${toVenueName} for ${activityName}.
+
+Thank you,
+Event Operations Team`;
+
+  const fullText = `Subject: ${subject}\n\n${body}`;
+
+  return { subject, body, fullText };
+}
+
+export function getEventRecoveryDecision(state: DemoState, eventId: string): Decision | undefined {
+  return state.decisions.filter((d) => d.eventId === eventId && d.outcome === "approved").at(-1);
 }
