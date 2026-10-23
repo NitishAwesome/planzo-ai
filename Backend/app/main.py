@@ -12,6 +12,7 @@ from .gemini_service import (
     stream_chat_response,
 )
 from .schemas import ChatRequest, HealthResponse
+from .weather import router as weather_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("planzo-backend")
@@ -21,6 +22,9 @@ app = FastAPI(
     description="Intelligent Event Contingency & Recovery Assistant API",
     version="1.0.0",
 )
+
+# Mount Open-Meteo Weather router
+app.include_router(weather_router, prefix="/api")
 
 # Configure CORS
 app.add_middleware(

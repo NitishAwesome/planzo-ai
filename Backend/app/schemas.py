@@ -2,6 +2,56 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 
+class LocationResult(BaseModel):
+    id: int | str
+    name: str
+    latitude: float
+    longitude: float
+    country: str | None = None
+    admin1: str | None = None
+    timezone: str | None = None
+
+
+class HourlyUnits(BaseModel):
+    time: str = "iso8601"
+    temperature_2m: str = "°C"
+    precipitation_probability: str = "%"
+    precipitation: str = "mm"
+    rain: str = "mm"
+    weather_code: str = "wmo code"
+    wind_speed_10m: str = "km/h"
+
+
+class HourlyForecast(BaseModel):
+    time: list[str] = Field(default_factory=list)
+    temperature_2m: list[float | None] = Field(default_factory=list)
+    precipitation_probability: list[int | None] = Field(default_factory=list)
+    precipitation: list[float | None] = Field(default_factory=list)
+    rain: list[float | None] = Field(default_factory=list)
+    weather_code: list[int | None] = Field(default_factory=list)
+    wind_speed_10m: list[float | None] = Field(default_factory=list)
+
+
+class ForecastResponse(BaseModel):
+    latitude: float
+    longitude: float
+    timezone: str = "UTC"
+    hourly_units: HourlyUnits = Field(default_factory=HourlyUnits)
+    hourly: HourlyForecast = Field(default_factory=HourlyForecast)
+    attribution: str = "Weather forecast data: Open-Meteo.com"
+    attribution_url: str = "https://open-meteo.com/"
+    fetched_at: str = ""
+
+
+class GeoLocation(BaseModel):
+    name: str
+    latitude: float
+    longitude: float
+    country: str | None = None
+    admin1: str | None = None
+    timezone: str | None = None
+
+
 class Venue(BaseModel):
     id: str
     name: str
@@ -9,6 +59,7 @@ class Venue(BaseModel):
     indoor: bool = False
     capacity: int = 0
     equipment: list[str] = Field(default_factory=list)
+    notes: str | None = None
 
 
 class Booking(BaseModel):
@@ -20,6 +71,15 @@ class Booking(BaseModel):
     end: str = ""
 
 
+class ForecastMetadata(BaseModel):
+    fetchedAt: str = ""
+    provider: str = "Open-Meteo"
+    precipitationProbabilityMax: int | float = 0
+    rainSumMm: float = 0.0
+    windSpeedMaxKmh: float | None = None
+    locationName: str = ""
+
+
 class Risk(BaseModel):
     kind: str = "heavy-rain"
     title: str = ""
@@ -28,6 +88,7 @@ class Risk(BaseModel):
     probability: int | float = 0
     window: str = ""
     status: str = "active"
+    forecastMetadata: ForecastMetadata | None = None
 
 
 class ScheduleItem(BaseModel):
@@ -38,6 +99,7 @@ class ScheduleItem(BaseModel):
 class PlanEvent(BaseModel):
     id: str
     name: str
+    description: str | None = None
     organizer: str = ""
     start: str = ""
     end: str = ""
@@ -47,6 +109,8 @@ class PlanEvent(BaseModel):
     requiredEquipment: list[str] = Field(default_factory=list)
     schedule: list[ScheduleItem] = Field(default_factory=list)
     risk: Risk | None = None
+    location: GeoLocation | None = None
+    weatherMode: str | None = None
 
 
 class VenueChecks(BaseModel):

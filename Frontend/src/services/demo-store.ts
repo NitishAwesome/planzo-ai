@@ -1,7 +1,28 @@
 import { useSyncExternalStore } from "react";
-import type { DemoState } from "@/data/types";
+import type {
+  DemoState,
+  EventFormData,
+  GeoLocation,
+  PlanEvent,
+  Risk,
+  Venue,
+  VenueFormData,
+} from "@/data/types";
 import { createSeedState } from "@/data/seed";
-import { approveProposal, nowLocal, rejectProposal } from "@/lib/planning";
+import {
+  approveProposal,
+  cancelEvent,
+  createEvent,
+  createVenue,
+  deleteEvent,
+  deleteVenue,
+  nowLocal,
+  rejectProposal,
+  setEventLocation,
+  setEventWeatherRisk,
+  updateEvent,
+  updateVenue,
+} from "@/lib/planning";
 
 /**
  * In-browser persistence layer. Swap this module for an API client to attach a backend;
@@ -47,6 +68,72 @@ export function useDemoState(): DemoState {
   );
 }
 
+export function getDemoStateSnapshot(): DemoState {
+  return load();
+}
+
+export function createEventAction(input: EventFormData): PlanEvent {
+  const current = load();
+  const { state: next, event } = createEvent(current, input, nowLocal());
+  commit(next);
+  return event;
+}
+
+export function updateEventAction(eventId: string, input: EventFormData): PlanEvent {
+  const current = load();
+  const { state: next, event } = updateEvent(current, eventId, input, nowLocal());
+  commit(next);
+  return event;
+}
+
+export function cancelEventAction(eventId: string) {
+  const current = load();
+  const next = cancelEvent(current, eventId, nowLocal());
+  commit(next);
+}
+
+export function deleteEventAction(eventId: string) {
+  const current = load();
+  const next = deleteEvent(current, eventId);
+  commit(next);
+}
+
+export function createVenueAction(input: VenueFormData): Venue {
+  const current = load();
+  const { state: next, venue } = createVenue(current, input, nowLocal());
+  commit(next);
+  return venue;
+}
+
+export function updateVenueAction(venueId: string, input: VenueFormData): Venue {
+  const current = load();
+  const { state: next, venue } = updateVenue(current, venueId, input, nowLocal());
+  commit(next);
+  return venue;
+}
+
+export function deleteVenueAction(venueId: string): void {
+  const current = load();
+  const next = deleteVenue(current, venueId, nowLocal());
+  commit(next);
+}
+
+export function setEventWeatherRiskAction(
+  eventId: string,
+  risk: Risk | null,
+  weatherMode?: "simulated" | "forecast",
+): void {
+  const current = load();
+  const next = setEventWeatherRisk(current, eventId, risk, weatherMode, nowLocal());
+  commit(next);
+}
+
+export function setEventLocationAction(eventId: string, location: GeoLocation | undefined): void {
+  const current = load();
+  const next = setEventLocation(current, eventId, location);
+  commit(next);
+}
+
 export function approve(proposalId: string) {
   commit(approveProposal(load(), proposalId, nowLocal()));
 }
@@ -55,6 +142,11 @@ export function reject(proposalId: string) {
   commit(rejectProposal(load(), proposalId, nowLocal()));
 }
 
+let resetCounter = 0;
+
 export function resetDemo() {
-  commit(createSeedState());
+  resetCounter += 1;
+  const next = createSeedState();
+  next.resetKey = Date.now() + resetCounter;
+  commit(next);
 }
